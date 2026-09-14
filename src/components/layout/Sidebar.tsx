@@ -177,11 +177,12 @@ export function Sidebar({
     >
       {/* Logo */}
       <div className="flex h-14 items-center gap-3 border-b border-slate-200 px-4 dark:border-slate-800">
-        <img
-          alt="Loyalty"
-          className="size-8 shrink-0 rounded-lg object-contain"
-          src="/loyalty-iso.png"
-        />
+        <div
+          aria-hidden
+          className="grid size-8 shrink-0 place-items-center rounded-lg bg-emerald-500 text-xs font-black text-white"
+        >
+          L
+        </div>
         {!collapsed && (
           <span className="text-sm font-black tracking-wide text-slate-900 dark:text-white">Loyalty</span>
         )}

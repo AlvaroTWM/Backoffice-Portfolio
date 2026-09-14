@@ -57,17 +57,9 @@ export function LandingPage({
       <section className="relative z-10 mx-auto flex w-full max-w-7xl flex-1 flex-col items-center justify-center gap-10 py-10 text-center">
         <div className="landing-hero">
           <div className="landing-card-stage" aria-hidden="true">
-            {isPortfolioDemo ? (
-              <div className="landing-card-image grid place-items-center bg-gradient-to-br from-emerald-400/30 via-sky-400/20 to-indigo-500/25 text-4xl font-black text-emerald-900/80">
-                LH
-              </div>
-            ) : (
-              <img
-                alt="Hero"
-                className="landing-card-image"
-                src="https://www.ueno.com.py/wp-content/uploads/2024/07/Albirroja.png?w=640"
-              />
-            )}
+            <div className="landing-card-image grid place-items-center bg-gradient-to-br from-emerald-400/30 via-sky-400/20 to-indigo-500/25 text-4xl font-black text-emerald-900/80">
+              LH
+            </div>
           </div>
 
           <div className="landing-hero-copy animate-fade-up animate-delay-2 max-w-4xl">
