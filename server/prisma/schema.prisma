@@ -1,0 +1,310 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Usuario {
+  user_id    String   @id @default(uuid())
+  email      String   @unique
+  nombre     String
+  rol        String   @default("alianzas")
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  directorio_creados    DirectorioAliado[] @relation("DirectorioCreador")
+  directorio_aprobados  DirectorioAliado[] @relation("DirectorioAprobador")
+  historial_estados     HistorialEstadoAliado[]
+  facturaciones         Facturacion[]
+  cuotas                Cuota[]
+  compromisos_creados   Compromiso[] @relation("CompromisoCreador")
+  compromisos_aprobados Compromiso[] @relation("CompromisoAprobador")
+  pagos                 Pago[]
+  aprobaciones_hechas   Aprobacion[] @relation("AprobacionSolicitante")
+  aprobaciones_dadas    Aprobacion[] @relation("AprobacionAprobador")
+  auditoria_hechas      Auditoria[]  @relation("AuditoriaUsuario")
+  auditoria_aprobadas   Auditoria[]  @relation("AuditoriaAprobador")
+  notas_credito         NotaCredito[]
+  movimientos_saldo     MovimientoSaldoFavor[]
+  ejecutivas_registradas AliadoEjecutivaMensual[]
+
+  @@map("usuarios")
+}
+
+model DirectorioAliado {
+  cod_aliado             String    @id
+  bolsa                  String?   @db.VarChar(100)
+  rubro                  String?   @db.VarChar(150)
+  brand                  String
+  cod_persona            Int?
+  estado_actual          String    @default("Activo")
+  fecha_registro_inicial DateTime? @db.Date
+  /// Saldo a favor reutilizable (PYG). Cache; movimientos en movimientos_saldo_favor.
+  saldo_a_favor          BigInt    @default(0)
+  user_id                String?
+  aprobador_id           String?
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @updatedAt
+
+  creador    Usuario? @relation("DirectorioCreador",   fields: [user_id],      references: [user_id])
+  aprobador  Usuario? @relation("DirectorioAprobador", fields: [aprobador_id], references: [user_id])
+
+  rucs                  AliadorRuc[]
+  historial             HistorialEstadoAliado[]
+  facturas              Facturacion[]
+  pagos                 Pago[]
+  notas_credito         NotaCredito[]
+  movimientos_saldo     MovimientoSaldoFavor[]
+  ejecutivas_mensuales  AliadoEjecutivaMensual[]
+
+  @@map("directorio_aliados")
+}
+
+model AliadorRuc {
+  ruc_id     String   @id @default(uuid())
+  cod_aliado String
+  ruc        String
+  principal  Boolean  @default(false)
+  created_at DateTime @default(now())
+
+  aliado DirectorioAliado @relation(fields: [cod_aliado], references: [cod_aliado], onDelete: Cascade)
+
+  @@unique([cod_aliado, ruc])
+  @@index([cod_aliado])
+  @@map("aliado_rucs")
+}
+
+model AliadoEjecutivaMensual {
+  id               String   @id @default(uuid()) @db.Uuid
+  cod_aliado       String
+  ejecutiva_nombre String   @db.VarChar(150)
+  mes              DateTime @db.Date
+  user_id          String?
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+
+  aliado  DirectorioAliado @relation(fields: [cod_aliado], references: [cod_aliado], onDelete: Cascade)
+  usuario Usuario?         @relation(fields: [user_id], references: [user_id])
+
+  @@unique([cod_aliado, mes], map: "aliado_ejecutiva_mensual_uniq")
+  @@index([mes], map: "idx_aliado_ejecutiva_mes")
+  @@index([cod_aliado], map: "idx_aliado_ejecutiva_cod")
+  @@map("aliado_ejecutiva_mensual")
+}
+
+model HistorialEstadoAliado {
+  historial_id String   @id @default(uuid())
+  cod_aliado   String
+  estado       String
+  fecha_cambio DateTime @default(now())
+  observacion  String?
+  user_id      String?
+
+  aliado  DirectorioAliado @relation(fields: [cod_aliado], references: [cod_aliado])
+  usuario Usuario?         @relation(fields: [user_id],   references: [user_id])
+
+  @@map("historial_estados_aliado")
+}
+
+model Facturacion {
+  deuda_id        String   @id
+  cod_aliado      String
+  periodo_mes     Int?
+  periodo_anio    Int?
+  monto_original  BigInt   @default(0)
+  saldo_pendiente BigInt   @default(0)
+  monto_compra    BigInt?
+  absorbe_ueno    BigInt?
+  clientes        Int?
+  trx             Int?
+  // CHECK DB: Pendiente | Financiada | Pagada | Anulada
+  estado_deuda    String   @default("Pendiente")
+  num_factura     String?
+  servicio        String?
+  user_id         String?
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  aliado  DirectorioAliado @relation(fields: [cod_aliado], references: [cod_aliado])
+  usuario Usuario?         @relation(fields: [user_id],    references: [user_id])
+
+  cuotas       Cuota[]
+  aplicaciones AplicacionPago[]
+  notas_credito_origen NotaCredito[]
+
+  @@map("facturacion")
+}
+
+model Cuota {
+  cuota_id          String    @id
+  deuda_id          String
+  nro_cuota         Int
+  fecha_vencimiento DateTime? @db.Date
+  monto_cuota       BigInt    @default(0)
+  saldo_cuota       BigInt    @default(0)
+  // CHECK DB: Pendiente | Parcial | Pagada | Vencida | Refinanciada
+  estado_cuota      String    @default("Pendiente")
+  motivo_cambio     String?
+  user_id           String?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  deuda   Facturacion @relation(fields: [deuda_id], references: [deuda_id])
+  usuario Usuario?    @relation(fields: [user_id],  references: [user_id])
+
+  compromisos    Compromiso[]
+  aplicaciones   AplicacionPago[]
+
+  @@map("cuotas")
+}
+
+model Compromiso {
+  compromiso_id     String    @id
+  cuota_id          String
+  fecha_promesa     DateTime  @db.Date
+  monto_promesa     BigInt    @default(0)
+  estado_compromiso String    @default("Pendiente")
+  observacion       String?
+  user_id           String?
+  aprobador_id      String?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  cuota     Cuota    @relation(fields: [cuota_id],     references: [cuota_id])
+  creador   Usuario? @relation("CompromisoCreador",   fields: [user_id],      references: [user_id])
+  aprobador Usuario? @relation("CompromisoAprobador", fields: [aprobador_id], references: [user_id])
+
+  pagos Pago[]
+
+  @@map("compromisos")
+}
+
+model Pago {
+  pago_id               String    @id
+  cod_aliado            String
+  compromiso_id         String?
+  fecha_pago            DateTime  @db.Date
+  monto_recibido        BigInt    @default(0)
+  metodo_pago           String?
+  nro_comprobante_banco String?
+  estado_pago           String    @default("Aplicado")
+  observacion           String?
+  user_id               String?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  aliado      DirectorioAliado @relation(fields: [cod_aliado],    references: [cod_aliado])
+  compromiso  Compromiso?      @relation(fields: [compromiso_id], references: [compromiso_id])
+  usuario     Usuario?         @relation(fields: [user_id],       references: [user_id])
+
+  aplicaciones AplicacionPago[]
+  movimientos_saldo MovimientoSaldoFavor[]
+  notas_credito_origen NotaCredito[]
+
+  @@unique([cod_aliado, nro_comprobante_banco], map: "pagos_aliado_comprobante_key")
+  @@map("pagos")
+}
+
+model AplicacionPago {
+  aplicacion_id    String   @id @default(uuid())
+  pago_id          String
+  /// Nullable cuando tipo_aplicacion es SALDO_A_FAVOR o CONSUMO_SALDO
+  cuota_id         String?
+  deuda_id         String?
+  monto_aplicado   BigInt   @default(0)
+  /// CUOTA | DEUDA | SALDO_A_FAVOR | CONSUMO_SALDO
+  tipo_aplicacion  String   @default("CUOTA")
+  orden_aplicacion Int      @default(1)
+  es_cascada       Boolean  @default(false)
+  created_at       DateTime @default(now())
+
+  pago  Pago         @relation(fields: [pago_id],  references: [pago_id])
+  cuota Cuota?       @relation(fields: [cuota_id], references: [cuota_id])
+  deuda Facturacion? @relation(fields: [deuda_id], references: [deuda_id])
+
+  @@map("aplicacion_pago")
+}
+
+model NotaCredito {
+  nc_id            String   @id
+  cod_aliado       String
+  deuda_origen_id  String?
+  pago_origen_id   String?
+  nro_nc           String?
+  fecha_nc         DateTime @default(now()) @db.Date
+  monto            BigInt
+  saldo_disponible BigInt
+  motivo           String
+  /// Vigente | Agotada | Anulada
+  estado           String   @default("Vigente")
+  user_id          String?
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  aliado       DirectorioAliado @relation(fields: [cod_aliado], references: [cod_aliado])
+  deuda_origen Facturacion?     @relation(fields: [deuda_origen_id], references: [deuda_id])
+  pago_origen  Pago?            @relation(fields: [pago_origen_id], references: [pago_id])
+  usuario      Usuario?         @relation(fields: [user_id], references: [user_id])
+  movimientos  MovimientoSaldoFavor[]
+
+  @@map("notas_credito")
+}
+
+model MovimientoSaldoFavor {
+  movimiento_id    String   @id
+  cod_aliado       String
+  /// ALTA_EXCEDENTE | ALTA_NC | CONSUMO_PAGO | REVERSO_ANULACION
+  tipo             String
+  monto            BigInt
+  saldo_resultante BigInt
+  pago_id          String?
+  nc_id            String?
+  observacion      String?
+  created_at       DateTime @default(now())
+  user_id          String?
+
+  aliado  DirectorioAliado @relation(fields: [cod_aliado], references: [cod_aliado])
+  pago    Pago?            @relation(fields: [pago_id], references: [pago_id])
+  nc      NotaCredito?     @relation(fields: [nc_id], references: [nc_id])
+  usuario Usuario?         @relation(fields: [user_id], references: [user_id])
+
+  @@map("movimientos_saldo_favor")
+}
+
+model Aprobacion {
+  aprobacion_id    String    @id @default(uuid())
+  tabla            String
+  registro_id      String
+  accion           String
+  datos_solicitud  Json
+  user_id          String
+  aprobador_id     String?
+  estado           String    @default("Pendiente")
+  observacion      String?
+  fecha_solicitud  DateTime  @default(now())
+  fecha_resolucion DateTime?
+
+  solicitante Usuario  @relation("AprobacionSolicitante", fields: [user_id],      references: [user_id])
+  aprobador   Usuario? @relation("AprobacionAprobador",   fields: [aprobador_id], references: [user_id])
+
+  @@map("aprobaciones")
+}
+
+model Auditoria {
+  auditoria_id  String   @id @default(uuid())
+  user_id       String
+  aprobador_id  String?
+  accion        String
+  tabla         String
+  registro_id   String
+  datos_antes   Json?
+  datos_despues Json?
+  created_at    DateTime @default(now())
+
+  usuario   Usuario  @relation("AuditoriaUsuario",  fields: [user_id],      references: [user_id])
+  aprobador Usuario? @relation("AuditoriaAprobador", fields: [aprobador_id], references: [user_id])
+
+  @@map("auditoria")
+}

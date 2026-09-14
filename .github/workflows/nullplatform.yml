@@ -1,0 +1,45 @@
+name: ci-nullplatform
+env:
+  NULLPLATFORM_API_KEY: ${{ secrets.NULLPLATFORM_API_KEY }}
+on:
+  push:
+    branches:
+      - main
+permissions:
+  id-token: write
+  contents: read
+  packages: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start Nullplatform CI
+        id: setup-ci
+        uses: nullplatform/github-action-setup-ci@v1
+        with:
+          api-key: ${{ secrets.NULLPLATFORM_API_KEY }}
+
+      - name: Get build parameters
+        id: get-build-parameters
+        uses: nullplatform/github-action-secrets-and-variables@v1
+        with:
+          application-id: ${{ steps.setup-ci.outputs.application-id }}
+
+      - name: Build asset for ${{ steps.setup-ci.outputs.application-name }}
+        id: build-asset
+        uses: nullplatform/github-action-asset-build@v1
+
+      - name: Push asset for ${{ steps.setup-ci.outputs.application-name }}
+        id: push-asset
+        uses: nullplatform/github-action-asset-push@v1
+        with:
+          build-id: ${{ steps.setup-ci.outputs.build-id }}
+          type: docker-image
+
+      - name: End Nullplatform CI
+        if: ${{ always() }}
+        id: end-setup-ci
+        uses: nullplatform/github-action-setup-ci@v1
+        with:
+          build-id: ${{ steps.setup-ci.outputs.build-id }}
+          status: ${{ contains(fromJSON('["failure", "cancelled"]'), job.status) && 'failed' || 'successful' }}
