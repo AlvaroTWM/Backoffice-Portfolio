@@ -293,7 +293,7 @@ function App() {
       .catch((error) => console.error('Health error:', error))
   }, [])
 
-  const startOktaLogin = async () => {
+  const startLogin = async () => {
     setOktaError(null)
     setIsSigningIn(true)
     try {
@@ -378,8 +378,8 @@ function App() {
       <LandingPage
         error={oktaError}
         isSigningIn={isSigningIn}
-        onGetStarted={() => void startOktaLogin()}
-        onSignIn={() => void startOktaLogin()}
+        onGetStarted={() => void startLogin()}
+        onSignIn={() => void startLogin()}
       />
     )
   }

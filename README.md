@@ -21,8 +21,7 @@ Abrí `http://localhost:5173` y usá **Iniciar sesión** (modo demo).
 1. Creá un repo nuevo en GitHub/GitLab y subí **solo** esta carpeta (`loyalty-backoffice-portfolio`).
 2. En Vercel: **Add New Project** → importá el repo.
 3. Framework: **Vite** (o dejá que detecte `vercel.json`).
-4. Variable de entorno:
-   - `VITE_PORTFOLIO_DEMO` = `true`
+4. (Opcional) Variable de entorno `VITE_PORTFOLIO_DEMO=true` — por defecto el demo ya está activo sin Okta.
 5. Deploy.
 
 No configures `DATABASE_URL`, Okta ni secretos: no se usan en este modo.
