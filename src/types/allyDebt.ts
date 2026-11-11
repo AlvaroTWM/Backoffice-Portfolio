@@ -14,6 +14,8 @@ export interface AliadoRecord {
   fecha_alta?: string
   fecha_baja?: string
   observacion?: string
+  /** Opcional (API): ejecutiva asignada, para la cabecera del drawer. */
+  ejecutiva_nombre?: string | null
 }
 
 export interface DetalleDeuda {
@@ -25,6 +27,10 @@ export interface DetalleDeuda {
   monto_original: number
   pagado: number
   saldo_pendiente: number
+  monto_compra?: number | null
+  absorbe_ueno?: number | null
+  clientes?: number | null
+  trx?: number | null
 }
 
 export interface AliadoResumen {
@@ -41,6 +47,10 @@ export interface AliadoResumen {
   monto_total_pagado: number
   saldo_pendiente: number
   estado_general: EstadoGeneralDeuda
+  /** Opcional (API): días hasta el próximo vencimiento. Si falta, la UI muestra la etiqueta de estado. */
+  dias_para_vencer?: number | null
+  /** Opcional (API): días de atraso de la cuota vencida más antigua. */
+  dias_vencido?: number | null
   ultimo_periodo?: string
   detalles_deuda?: DetalleDeuda[]
 }
@@ -58,12 +68,21 @@ export interface AliadosListQuery {
   periodOrder?: 'recent' | 'oldest' | 'amount_desc' | 'amount_asc'
 }
 
+export interface AliadosListTotales {
+  deuda_total: number
+  saldo_pendiente: number
+  monto_pagado: number
+  vencido: number
+  aliados_en_mora: number
+}
+
 export interface PaginatedAliadosResponse {
   items: AliadoResumen[]
   page: number
   pageSize: number
   total: number
   totalPages: number
+  totales?: AliadosListTotales
 }
 
 export interface FacturaRecord {
@@ -296,7 +315,7 @@ export interface ActualizarCuotaPayload {
 export interface SolicitarAprobacionPayload {
   tabla: string
   registro_id: string
-  accion: 'BAJA_ALIADO' | 'MODIFICAR_ALIADO' | 'CREAR_COMPROMISO' | 'MODIFICAR_COMPROMISO' | 'ANULAR_PAGO' | 'ANULAR_DEUDA' | 'CREAR_PLAN' | 'REFINANCIAR_DEUDA'
+  accion: 'BAJA_ALIADO' | 'MODIFICAR_ALIADO' | 'CREAR_COMPROMISO' | 'MODIFICAR_COMPROMISO' | 'ANULAR_PAGO' | 'ANULAR_DEUDA' | 'CREAR_PLAN' | 'REFINANCIAR_DEUDA' | 'MODIFICAR_MONTO_DEUDA'
   datos_solicitud?: Record<string, unknown>
   observacion?: string
   asignado_a_user_id?: string

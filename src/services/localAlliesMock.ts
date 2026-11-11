@@ -27,13 +27,13 @@ const localSessionUser: AuthUser = {
 }
 
 const mockAlliesBase: AliadoRecord[] = [
-  { aliado_id: 'A-001', aliado_nombre: 'Maxifarma Encarnacion', ruc: '80012345-1', codigo_persona: 'P-001', estado: 'activo', fecha_alta: '2024-01-15' },
-  { aliado_id: 'A-002', aliado_nombre: 'Bacon',                 ruc: '80023456-2', codigo_persona: 'P-002', estado: 'activo', fecha_alta: '2024-02-10' },
-  { aliado_id: 'A-003', aliado_nombre: 'Starbucks',             ruc: '80034567-3', codigo_persona: 'P-003', estado: 'activo', fecha_alta: '2024-03-01' },
-  { aliado_id: 'A-004', aliado_nombre: 'Burguer King',          ruc: '80045678-4', codigo_persona: 'P-004', estado: 'activo', fecha_alta: '2024-03-15' },
-  { aliado_id: 'A-005', aliado_nombre: 'Pizza Hut',             ruc: '80056789-5', codigo_persona: 'P-005', estado: 'activo', fecha_alta: '2024-04-01' },
-  { aliado_id: 'A-006', aliado_nombre: 'Don Vito',              ruc: '80067890-6', codigo_persona: 'P-006', estado: 'activo', fecha_alta: '2024-04-20' },
-  { aliado_id: 'A-007', aliado_nombre: 'Lomy',                  ruc: '80078901-7', codigo_persona: 'P-007', estado: 'activo', fecha_alta: '2024-05-01' },
+  { aliado_id: 'A-001', bolsa: 'A', rubro: 'Retail', ejecutiva_nombre: 'Valeria', aliado_nombre: 'Maxifarma Encarnacion', ruc: '80012345-1', codigo_persona: 'P-001', estado: 'activo', fecha_alta: '2024-01-15' },
+  { aliado_id: 'A-002', bolsa: 'B', rubro: 'Gastronomía', ejecutiva_nombre: 'Constanza', aliado_nombre: 'Bacon',                 ruc: '80023456-2', codigo_persona: 'P-002', estado: 'activo', fecha_alta: '2024-02-10' },
+  { aliado_id: 'A-003', bolsa: 'A', rubro: 'Gastronomía', ejecutiva_nombre: 'Valeria', aliado_nombre: 'Starbucks',             ruc: '80034567-3', codigo_persona: 'P-003', estado: 'activo', fecha_alta: '2024-03-01' },
+  { aliado_id: 'A-004', bolsa: 'A', rubro: 'Gastronomía', ejecutiva_nombre: 'Constanza', aliado_nombre: 'Burguer King',          ruc: '80045678-4', codigo_persona: 'P-004', estado: 'activo', fecha_alta: '2024-03-15' },
+  { aliado_id: 'A-005', bolsa: 'B', rubro: 'Gastronomía', ejecutiva_nombre: 'Valeria', aliado_nombre: 'Pizza Hut',             ruc: '80056789-5', codigo_persona: 'P-005', estado: 'activo', fecha_alta: '2024-04-01' },
+  { aliado_id: 'A-006', bolsa: 'B', rubro: 'Gastronomía', ejecutiva_nombre: 'Constanza', aliado_nombre: 'Don Vito',              ruc: '80067890-6', codigo_persona: 'P-006', estado: 'activo', fecha_alta: '2024-04-20' },
+  { aliado_id: 'A-007', bolsa: 'B', rubro: 'Gastronomía', ejecutiva_nombre: 'Valeria', aliado_nombre: 'Lomy',                  ruc: '80078901-7', codigo_persona: 'P-007', estado: 'activo', fecha_alta: '2024-05-01' },
 ]
 
 let mockFacturas: FacturaRecord[] = [
@@ -98,6 +98,28 @@ let mockCompromisos: CompromisosRecord[] = [
   { compromiso_id: 'K-004', cuota_id: 'C-2009', fecha_compromiso: '2026-06-01', monto_compromiso: 1500000, estado_compromiso: 'pendiente', observacion: '' },
 ]
 
+/**
+ * Las fechas del mock están escritas alrededor del 10/06/2026. Se desplazan para que ese día
+ * coincida con "hoy", así la demo siempre muestra una mezcla de cuotas vencidas y por vencer.
+ */
+const MOCK_REFERENCE_DATE = Date.UTC(2026, 5, 10)
+const MOCK_DAY_OFFSET = Math.round(
+  (Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()) - MOCK_REFERENCE_DATE) /
+    (24 * 60 * 60 * 1000),
+)
+
+function shiftMockDate(isoDate: string | undefined) {
+  if (!isoDate) return isoDate
+  const d = new Date(`${isoDate}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + MOCK_DAY_OFFSET)
+  return d.toISOString().slice(0, 10)
+}
+
+mockFacturas = mockFacturas.map((f) => ({ ...f, fecha_deuda: shiftMockDate(f.fecha_deuda) }))
+mockCuotas = mockCuotas.map((c) => ({ ...c, fecha_vencimiento: shiftMockDate(c.fecha_vencimiento) ?? c.fecha_vencimiento }))
+mockPagos = mockPagos.map((p) => ({ ...p, fecha_pago: shiftMockDate(p.fecha_pago) ?? p.fecha_pago }))
+mockCompromisos = mockCompromisos.map((k) => ({ ...k, fecha_compromiso: shiftMockDate(k.fecha_compromiso) ?? k.fecha_compromiso }))
+
 let localDebtSeq = 2000000
 
 function computeSummary(aliadoId: string) {
@@ -143,6 +165,8 @@ export async function listarAliadosLocal(): Promise<AliadoResumen[]> {
       estado:             ally.estado,
       estado_general:     computeEstadoGeneral(summary.saldo_pendiente, summary.deuda_total),
       ruc:                ally.ruc,
+      bolsa:              ally.bolsa,
+      rubro:              ally.rubro,
       ...summary,
     }
   })

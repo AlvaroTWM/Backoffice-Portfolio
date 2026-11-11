@@ -194,25 +194,6 @@ export async function selectAppRole(role: UserRole): Promise<AuthUser> {
   return user
 }
 
-export async function loginWithEmail(email: string): Promise<AuthUser> {
-  const response = await fetch(`${API_BASE}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
-  })
-
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
-    throw new Error((body as { message?: string }).message ?? 'Error al iniciar sesión.')
-  }
-
-  const data = (await response.json()) as { token: string; user: AuthUser; availableRoles?: UserRole[] }
-  const availableRoles = normalizeRoles(data.availableRoles ?? data.user.availableRoles, data.user.role)
-  const user: AuthUser = { ...data.user, availableRoles }
-  storeSession({ ...user, jwtToken: data.token })
-  return user
-}
-
 export function getStoredSession(): AuthUser | null {
   const session = parseStoredSession()
   if (!session) return null

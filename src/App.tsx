@@ -3,10 +3,16 @@ import { AllyDetailPage } from './components/allies/AllyDetailPage'
 import { AlliesPaymentsView } from './components/allies/AlliesPaymentsView'
 import { AprobacionesView } from './components/aprobaciones/AprobacionesView'
 import { LandingPage } from './components/auth/LandingPage'
+import { BaseUnicaClientesPage } from './components/clientes/BaseUnicaClientesPage'
 import { OktaCallbackPage } from './components/auth/OktaCallbackPage'
 import { RoleSelectPage } from './components/auth/RoleSelectPage'
 import { DashboardView } from './components/dashboard/DashboardView'
 import { CsvImportView } from './components/dev/CsvImportView'
+import { ReportViewer } from './components/reports/ReportViewer'
+import { ReportsView } from './components/reports/ReportsView'
+import { isPortfolioDemo } from './config/portfolio'
+import { parseReportPath, rememberReturnTo, takeReturnTo } from './components/reports/reportRoute'
+import type { ReportRoute } from './components/reports/reportRoute'
 import { USER_ROLE_LABELS } from './types/auth'
 import { Sidebar } from './components/layout/Sidebar'
 import type { AppView } from './components/layout/Sidebar'
@@ -16,9 +22,9 @@ import { useAllies } from './hooks/useAllies'
 import { useAprobaciones } from './hooks/useAprobaciones'
 import { useDarkMode } from './hooks/useDarkMode'
 import { useSessionContext } from './hooks/useSessionContext'
-import { isPortfolioDemo } from './config/portfolio'
 import {
   clearStoredSession,
+  getStoredSession,
   loadOktaConfig,
   loginPortfolioDemo,
   loginWithOkta,
@@ -28,7 +34,7 @@ import {
 import { toast } from './services/toast'
 import type { AuthUser, UserRole } from './types/auth'
 
-type AuthView = 'landing' | 'session' | 'okta-callback' | 'role-select'
+type AuthView = 'landing' | 'clientes' | 'session' | 'okta-callback' | 'role-select' | 'report'
 
 function SessionGate({
   error,
@@ -87,6 +93,7 @@ function AuthenticatedApp({
     setEjecutivaFilter,
     setNameFilter,
     setPage,
+    setPageSize,
     setPeriodOrder,
     setRubroFilter,
     setServicioFilter,
@@ -94,6 +101,7 @@ function AuthenticatedApp({
     selectedAllyId,
     selectAlly,
     totalAllies,
+    totales,
     totalPages,
     voidPaymentOnCuota,
   } = useAllies()
@@ -107,6 +115,8 @@ function AuthenticatedApp({
   } = useAprobaciones()
 
   const [appView, setAppView] = useState<AppView>(() => {
+    // Link compartido del drawer (?aliado=ID): aterriza directo en Aliados
+    if (new URLSearchParams(window.location.search).get('aliado')) return 'allies'
     if (user.role === 'admin' || user.role === 'gerencia') return 'dashboard'
     return 'allies'
   })
@@ -191,6 +201,9 @@ function AuthenticatedApp({
                 if (periodOrder !== undefined) setPeriodOrder(periodOrder)
               }}
               onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+              onPreviewAlly={selectAlly}
+              pageSize={listQuery.pageSize}
               onImportDebts={importDebts}
               onRegisterPayment={registerPayment}
               onRefresh={refetch}
@@ -199,6 +212,7 @@ function AuthenticatedApp({
               selectedAllyDetail={selectedAllyDetail}
               selectedAllyId={selectedAllyId}
               totalAllies={totalAllies}
+              totales={totales}
               totalPages={totalPages}
             />
           )}
@@ -220,14 +234,7 @@ function AuthenticatedApp({
             />
           )}
 
-          {appView === 'reports' && (
-            <div className="flex flex-col gap-4">
-              <h1 className="text-2xl font-black text-slate-900 dark:text-slate-100">Reportes</h1>
-              <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-slate-400 dark:border-slate-700 dark:bg-slate-800">
-                Próximamente
-              </div>
-            </div>
-          )}
+          {appView === 'reports' && <ReportsView />}
 
           {appView === 'users' && <UsersView />}
 
@@ -274,10 +281,20 @@ function isOktaCallbackPath() {
   return typeof window !== 'undefined' && window.location.pathname === '/callback'
 }
 
+function isClientesPath() {
+  return typeof window !== 'undefined' && window.location.pathname === '/clientes'
+}
+
 function App() {
-  const [authView, setAuthView] = useState<AuthView>(() =>
-    isOktaCallbackPath() ? 'okta-callback' : 'landing',
+  const [reportRoute, setReportRoute] = useState<ReportRoute | null>(() =>
+    parseReportPath(window.location.pathname),
   )
+  const [authView, setAuthView] = useState<AuthView>(() => {
+    if (isOktaCallbackPath()) return 'okta-callback'
+    if (isClientesPath()) return 'clientes'
+    if (reportRoute && getStoredSession()) return 'report'
+    return 'landing'
+  })
   const [sessionAttempt, setSessionAttempt] = useState(0)
   const [oktaError, setOktaError] = useState<string | null>(null)
   const [isSigningIn, setIsSigningIn] = useState(false)
@@ -293,9 +310,10 @@ function App() {
       .catch((error) => console.error('Health error:', error))
   }, [])
 
-  const startLogin = async () => {
+  const startOktaLogin = async () => {
     setOktaError(null)
     setIsSigningIn(true)
+    rememberReturnTo(window.location.pathname)
     try {
       if (isPortfolioDemo) {
         await loginPortfolioDemo('admin')
@@ -315,9 +333,21 @@ function App() {
     setPendingRoleUser(null)
     setOktaError(null)
     setIsSigningIn(false)
+    const returnTo = takeReturnTo()
+    if (returnTo) {
+      setReportRoute(returnTo)
+      setAuthView('report')
+      return
+    }
     setSessionAttempt((n) => n + 1)
     setAuthView('session')
   }
+
+  const handleReportSessionExpired = useCallback(() => {
+    clearStoredSession()
+    setOktaError('Tu sesión venció. Iniciá sesión de nuevo para ver el reporte.')
+    setAuthView('landing')
+  }, [])
 
   const backToLanding = () => {
     setIsSigningIn(false)
@@ -342,6 +372,12 @@ function App() {
       return
     }
     setPendingRoleUser(null)
+    const returnTo = takeReturnTo()
+    if (returnTo) {
+      setReportRoute(returnTo)
+      setAuthView('report')
+      return
+    }
     setSessionAttempt((n) => n + 1)
     setAuthView('session')
   }, [])
@@ -356,6 +392,14 @@ function App() {
   const handleSelectRole = async (role: UserRole) => {
     await selectAppRole(role)
     enterSession()
+  }
+
+  if (authView === 'report' && reportRoute) {
+    return <ReportViewer route={reportRoute} onSessionExpired={handleReportSessionExpired} />
+  }
+
+  if (authView === 'clientes') {
+    return <BaseUnicaClientesPage />
   }
 
   if (authView === 'okta-callback') {
@@ -378,8 +422,7 @@ function App() {
       <LandingPage
         error={oktaError}
         isSigningIn={isSigningIn}
-        onGetStarted={() => void startLogin()}
-        onSignIn={() => void startLogin()}
+        onGetStarted={() => void startOktaLogin()}
       />
     )
   }

@@ -26,6 +26,7 @@ const accionLabels: Record<string, string> = {
   MODIFICAR_COMPROMISO: 'Modificar compromiso',
   ANULAR_PAGO:          'Anular pago',
   ANULAR_DEUDA:         'Anular deuda',
+  MODIFICAR_MONTO_DEUDA: 'Modificar monto de deuda',
   CREAR_PLAN:           'Plan de pagos',
   REFINANCIAR_DEUDA:    'Refinanciación',
 }
@@ -47,6 +48,7 @@ const rolLabels: Record<string, string> = {
 const accionColors: Record<string, { dot: string; badge: string }> = {
   BAJA_ALIADO:  { dot: 'bg-rose-400',   badge: 'bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400' },
   ANULAR_DEUDA: { dot: 'bg-rose-400',   badge: 'bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400' },
+  MODIFICAR_MONTO_DEUDA: { dot: 'bg-sky-400', badge: 'bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400' },
   ANULAR_PAGO:  { dot: 'bg-rose-400',   badge: 'bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400' },
   MODIFICAR_ALIADO:     { dot: 'bg-sky-400',   badge: 'bg-sky-50 text-sky-600 dark:bg-sky-900/30 dark:text-sky-400' },
   CREAR_COMPROMISO:     { dot: 'bg-amber-400', badge: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
@@ -100,6 +102,14 @@ function DetallesSolicitud({ datos, accion }: { datos?: Record<string, unknown>;
     } else if (datos.campo_modificar === 'otro') {
       rows.push({ label: 'Nuevo valor', value: 'Ver observación (gestión manual)' })
     }
+  }
+
+  if (accion === 'MODIFICAR_MONTO_DEUDA') {
+    if (datos.factura_id) rows.push({ label: 'Factura', value: String(datos.factura_id) })
+    if (datos.periodo) rows.push({ label: 'Período', value: String(datos.periodo) })
+    if (datos.monto_actual !== undefined) rows.push({ label: 'Monto actual', value: formatCurrency(datos.monto_actual) ?? String(datos.monto_actual) })
+    if (datos.monto_nuevo !== undefined) rows.push({ label: 'Monto nuevo', value: formatCurrency(datos.monto_nuevo) ?? String(datos.monto_nuevo) })
+    if (datos.motivo) rows.push({ label: 'Motivo', value: String(datos.motivo) })
   }
 
   if (accion === 'ANULAR_DEUDA') {

@@ -9,11 +9,11 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variants: Record<ButtonVariant, string> = {
   primary:
-    'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/30 hover:bg-emerald-400 focus-visible:outline-emerald-500',
+    'bg-loyalty-fresh text-white shadow-loyalty hover:bg-loyalty-fresh-strong focus-visible:outline-loyalty-fresh active:scale-[0.97]',
   secondary:
-    'bg-slate-950 text-white hover:bg-slate-800 focus-visible:outline-slate-950 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white',
+    'bg-loyalty-jungle text-white hover:bg-loyalty-jungle-muted focus-visible:outline-loyalty-jungle active:scale-[0.97] dark:bg-loyalty-fresh-soft dark:text-loyalty-jungle dark:hover:bg-white',
   ghost:
-    'bg-transparent text-slate-700 hover:bg-slate-100 focus-visible:outline-slate-400 dark:text-slate-300 dark:hover:bg-slate-800',
+    'bg-transparent text-loyalty-jungle hover:bg-loyalty-fresh-soft/60 focus-visible:outline-loyalty-cool-gray active:scale-[0.98] dark:text-slate-200 dark:hover:bg-loyalty-jungle-muted/50',
 }
 
 export function Button({
@@ -27,7 +27,7 @@ export function Button({
   return (
     <button
       type={type}
-      className={`inline-flex items-center justify-center rounded-2xl px-4 py-3 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-70 ${variants[variant]} ${className}`}
+      className={`inline-flex items-center justify-center rounded-2xl px-4 py-3 text-sm font-semibold transition-[transform,background-color,box-shadow,color] duration-loyalty ease-loyalty-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-70 ${variants[variant]} ${className}`}
       disabled={props.disabled || isLoading}
       {...props}
     >

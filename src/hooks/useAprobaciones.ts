@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { portfolioAwareFetch } from '../services/portfolioDemo/fetch'
+import { getStoredJwt } from '../services/auth'
 
 export interface Aprobacion {
   aprobacion_id:      string
@@ -17,6 +17,16 @@ export interface Aprobacion {
   datos_solicitud?:   Record<string, unknown>
 }
 
+const API_BASE = import.meta.env.VITE_API_URL?.trim() ?? ''
+
+function authHeaders() {
+  const token = getStoredJwt()
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+}
+
 export function useAprobaciones() {
   const [aprobaciones, setAprobaciones] = useState<Aprobacion[]>([])
   const [isLoading, setIsLoading]       = useState(false)
@@ -26,7 +36,9 @@ export function useAprobaciones() {
     setIsLoading(true)
     setError(null)
     try {
-      const res = await portfolioAwareFetch('/api/aprobaciones')
+      const res = await fetch(`${API_BASE}/api/aprobaciones`, {
+        headers: authHeaders(),
+      })
       if (!res.ok) throw new Error('Error al obtener aprobaciones.')
       const data = (await res.json()) as { items: Aprobacion[] }
       setAprobaciones(data.items)
@@ -41,8 +53,9 @@ export function useAprobaciones() {
 
   const resolver = useCallback(
     async (aprobacion_id: string, estado: 'Aprobado' | 'Rechazado', observacion: string) => {
-      const res = await portfolioAwareFetch(`/api/aprobaciones/${aprobacion_id}/resolver`, {
+      const res = await fetch(`${API_BASE}/api/aprobaciones/${aprobacion_id}/resolver`, {
         method:  'PATCH',
+        headers: authHeaders(),
         body:    JSON.stringify({ estado, observacion }),
       })
       if (!res.ok) {

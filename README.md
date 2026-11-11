@@ -4,7 +4,8 @@ Versión **pública** del backoffice de gestión de deudas y pagos de aliados, p
 
 - Sin Okta, sin base de datos ni credenciales reales.
 - Datos de ejemplo en memoria (nombres de comercios ficticios).
-- Misma UI que el producto interno: dashboard, aliados, aprobaciones, reportes y usuarios.
+- Misma UI que el producto interno: landing con animación de tarjetas, dashboard, aliados (con panel lateral de detalle y popover de vencidos), aprobaciones, reportes, base única de clientes (`/clientes`) y usuarios.
+- Las llamadas a `/api/...` se resuelven en el navegador con datos ficticios (`src/services/portfolioDemo`). Las fechas del mock se ajustan al día actual para que siempre haya cuotas vencidas y por vencer.
 
 ## Desarrollo local
 

@@ -1,103 +1,348 @@
-import { useEffect, useMemo, useState } from 'react'
+import {
+  ArrowPathIcon,
+  BanknotesIcon,
+  BellAlertIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  EyeIcon,
+  MagnifyingGlassIcon,
+} from '@heroicons/react/24/outline'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { exportarAliados, exportarAliadosDeudaDetalle, obtenerFiltrosAliados } from '../../services/alliesApi'
 import type {
   AliadoDetalle,
   AliadosListQuery,
+  AliadosListTotales,
   AliadoResumen,
   CrearFacturaPayload,
-  EstadoGeneralDeuda,
   ImportarDeudasPayload,
   ImportarDeudasResult,
   RegistrarPagoPayload,
 } from '../../types/allyDebt'
-import { Button } from '../ui/Button'
+import {
+  PILL_TONE_CLASS,
+  formatGs,
+  formatNumber,
+  percent,
+  pluralDays,
+  relativeMinutes,
+  toTitleCase,
+  type PillTone,
+} from '../../utils/allyFormat'
+import { useAllyPlan } from '../../hooks/useAllyPlan'
+import { pickPaymentTarget } from '../../utils/allyPayment'
+import { parseCatalogMulti, serializeCatalogMulti } from '../../utils/catalogNormalize'
 import { Input } from '../ui/Input'
+import { MultiSelectDropdown } from '../ui/MultiSelectDropdown'
 import { Select } from '../ui/Select'
+import { AllyDetailDrawer } from './AllyDetailDrawer'
+import { OverdueAlliesPopover } from './OverdueAlliesPopover'
+import { RegistrarPagoModal, type RegistrarPagoModalTarget } from './RegistrarPagoModal'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const debtStatusLabels: Record<EstadoGeneralDeuda, string> = {
-  pagado: 'Pagado',
-  parcial: 'Parcial',
-  pendiente: 'Pendiente',
-  con_vencimiento: 'Con vencimiento',
-  sin_deuda: 'Sin deuda',
+const PAGE_SIZE_OPTIONS = [25, 50, 100]
+const ACTIVE_FILTER_BORDER = '!border-loyalty-fresh'
+const COMPACT_CONTROL = '!py-2'
+
+function readAllyParam(): string | null {
+  return new URLSearchParams(window.location.search).get('aliado')
 }
 
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat('es-PY', {
-    currency: 'PYG',
-    maximumFractionDigits: 0,
-    style: 'currency',
-  }).format(amount)
+function writeAllyParam(id: string | null) {
+  const url = new URL(window.location.href)
+  if (id) url.searchParams.set('aliado', id)
+  else url.searchParams.delete('aliado')
+  window.history.replaceState(null, '', url)
 }
 
-function getStatusStyles(status: string) {
-  switch (status) {
-    case 'pagado':
-    case 'pagada':
-      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'
-    case 'parcial':
-      return 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-400'
-    case 'vencida':
-    case 'con_vencimiento':
-      return 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-400'
-    case 'pendiente':
-    default:
-      return 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400'
+/** El color comunica urgencia: gris = sin urgencia, ámbar = vence pronto, rojo = vencido, verde = pagado. */
+function debtPill(ally: AliadoResumen): { label: string; tone: PillTone } {
+  const { estado_general: estado, dias_para_vencer: soon, dias_vencido: late } = ally
+  if (estado === 'pagado') return { label: 'Pagado', tone: 'success' }
+  if (estado === 'con_vencimiento') {
+    return late && late > 0
+      ? { label: `Vencido hace ${pluralDays(late)}`, tone: 'danger' }
+      : { label: 'Con vencimiento', tone: 'danger' }
   }
+  if (estado !== 'sin_deuda' && soon != null && soon >= 0 && soon <= 7) {
+    return { label: soon === 0 ? 'Vence hoy' : `Vence en ${pluralDays(soon)}`, tone: 'warning' }
+  }
+  if (estado === 'parcial') return { label: 'Parcial', tone: 'neutral' }
+  if (estado === 'pendiente') return { label: 'Pendiente', tone: 'neutral' }
+  return { label: 'Sin deuda', tone: 'neutral' }
 }
 
-// ─── AllyRow (fila principal + fila expandida) ────────────────────────────────
+function allyStatusDot(estado: string): { className: string; title: string } | null {
+  const key = (estado || '').trim().toLowerCase()
+  if (!key || key === 'activo') return null
+  if (key === 'suspendido') return { className: 'bg-rose-500', title: 'Aliado suspendido' }
+  return { className: 'bg-slate-400', title: key === 'inactivo' ? 'Aliado inactivo' : `Aliado ${key}` }
+}
+
+// ─── Piezas visuales ─────────────────────────────────────────────────────────
+
+function SkeletonBlock({ className = '' }: { className?: string }) {
+  return <div className={`animate-pulse rounded bg-slate-200 dark:bg-slate-700 ${className}`} />
+}
+
+interface KpiCardProps {
+  label: string
+  value: string
+  detail: string
+  loading: boolean
+  danger?: boolean
+  /** Si se pasa, la tarjeta es un botón que aplica un filtro de la tabla. */
+  onClick?: () => void
+  active?: boolean
+  title?: string
+}
+
+function KpiCard({ active = false, danger = false, detail, label, loading, onClick, title, value }: KpiCardProps) {
+  const interactive = Boolean(onClick)
+  const Tag = interactive ? 'button' : 'div'
+  return (
+    <Tag
+      {...(interactive ? { type: 'button' as const, onClick, 'aria-expanded': active, 'aria-haspopup': 'dialog' as const, title } : {})}
+      className={`block h-full w-full rounded-xl border bg-white px-4 py-3 text-left shadow-sm transition-[colors,box-shadow,transform] duration-150 dark:bg-slate-800/60 ${
+        danger
+          ? 'border-rose-300/70 dark:border-rose-500/40'
+          : 'border-slate-200 dark:border-slate-700'
+      } ${
+        interactive
+          ? 'cursor-pointer hover:shadow-md active:scale-[0.99] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-400'
+          : ''
+      } ${active ? 'ring-2 ring-rose-400 dark:ring-rose-500' : ''}`}
+    >
+      <div className="flex items-center gap-1.5">
+        {danger ? <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-rose-500" /> : null}
+        <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</p>
+      </div>
+      {loading ? (
+        <>
+          <SkeletonBlock className="mt-2 h-7 w-36" />
+          <SkeletonBlock className="mt-2 h-3.5 w-28" />
+        </>
+      ) : (
+        <>
+          <p
+            className={`mt-1 text-2xl font-semibold tabular-nums ${
+              danger ? 'text-rose-600 dark:text-rose-300' : 'text-slate-900 dark:text-slate-50'
+            }`}
+          >
+            {value}
+          </p>
+          <p className="mt-0.5 text-xs tabular-nums text-slate-500 dark:text-slate-400">{detail}</p>
+        </>
+      )}
+    </Tag>
+  )
+}
+
+interface ExportMenuProps {
+  disabled: boolean
+  exporting: boolean
+  onExportDetalle: () => void
+  onExportResumen: () => void
+}
+
+function ExportMenu({ disabled, exporting, onExportDetalle, onExportResumen }: ExportMenuProps) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const itemClass =
+    'block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors duration-150 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700'
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors duration-150 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-loyalty-fresh disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+        type="button"
+      >
+        {exporting ? 'Exportando…' : 'Exportar'}
+        <ChevronDownIcon className={`h-3.5 w-3.5 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open ? (
+        <div
+          className="animate-soft-pop absolute right-0 z-30 mt-1 w-64 origin-top-right overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-800"
+          role="menu"
+        >
+          <button
+            className={itemClass}
+            onClick={() => { setOpen(false); onExportDetalle() }}
+            role="menuitem"
+            type="button"
+          >
+            Exportar desglose pendientes
+          </button>
+          <button
+            className={itemClass}
+            onClick={() => { setOpen(false); onExportResumen() }}
+            role="menuitem"
+            type="button"
+          >
+            Exportar resumen
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+// ─── Fila ────────────────────────────────────────────────────────────────────
 
 interface AllyRowProps {
   ally: AliadoResumen
   isSelected: boolean
-  onSelectAlly: (id: string | number) => Promise<void>
+  onOpen: (ally: AliadoResumen) => void
+  onPay: (ally: AliadoResumen) => void
 }
 
-function AllyRow({ ally, isSelected, onSelectAlly }: AllyRowProps) {
+const actionBtn =
+  'inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors duration-150 hover:bg-slate-200/70 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-loyalty-fresh disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100'
+
+function AllyRow({ ally, isSelected, onOpen, onPay }: AllyRowProps) {
+  const dot = allyStatusDot(ally.estado)
+  const pill = debtPill(ally)
+  const pct = percent(ally.monto_total_pagado, ally.deuda_total)
+  const name = toTitleCase(ally.aliado_nombre)
+
   return (
     <tr
-      className={`cursor-pointer transition-colors ${
+      className={`group cursor-pointer transition-colors duration-150 ${
         isSelected
-          ? 'bg-emerald-50/60 dark:bg-emerald-900/20'
-          : 'hover:bg-slate-50/60 dark:hover:bg-slate-800/50'
+          ? 'bg-loyalty-fresh/10 dark:bg-loyalty-fresh/10'
+          : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
       }`}
-      onClick={() => void onSelectAlly(ally.aliado_id)}
+      onClick={() => onOpen(ally)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(ally)
+      }}
+      tabIndex={0}
     >
-      <td className="px-3 py-3">
-        <p className="font-black text-slate-950 dark:text-white">{ally.aliado_nombre}</p>
+      <td className="px-4 py-2 align-middle">
+        <div className="flex min-w-0 items-center gap-2">
+          {dot ? (
+            <span
+              aria-label={dot.title}
+              className={`h-2 w-2 shrink-0 rounded-full ${dot.className}`}
+              role="img"
+              title={dot.title}
+            />
+          ) : null}
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-50" title={ally.aliado_nombre}>
+              {name}
+            </p>
+            <p className="truncate text-[13px] text-slate-500 dark:text-slate-400">{ally.ruc || '—'}</p>
+          </div>
+        </div>
       </td>
-      <td className="px-3 py-3 text-slate-600 dark:text-slate-300">{ally.bolsa ?? '—'}</td>
-      <td className="px-3 py-3 text-slate-600 dark:text-slate-300">{ally.rubro ?? '—'}</td>
-      <td className="px-3 py-3">
-        <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-300">
-          {ally.estado || 'Sin estado'}
+      <td className="px-4 py-2 align-middle">
+        <p className="truncate text-sm text-slate-800 dark:text-slate-200">{ally.bolsa || '—'}</p>
+        <p className="truncate text-[13px] text-slate-500 dark:text-slate-400">{ally.rubro || '—'}</p>
+      </td>
+      <td className="px-4 py-2 align-middle">
+        <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${PILL_TONE_CLASS[pill.tone]}`}>
+          {pill.label}
         </span>
       </td>
-      <td className="px-3 py-3">
-        <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${getStatusStyles(ally.estado_general)}`}>
-          {debtStatusLabels[ally.estado_general]}
-        </span>
+      <td className="px-4 py-2 text-right align-middle">
+        <p className="text-sm font-semibold tabular-nums text-slate-900 dark:text-slate-50">
+          {formatNumber(ally.saldo_pendiente)}
+        </p>
+        <div className="my-1 flex items-center justify-end gap-2">
+          <div className="h-1 w-24 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+            <div className="h-full rounded-full bg-loyalty-fresh" style={{ width: `${pct}%` }} />
+          </div>
+          <span className="w-8 text-right text-[11px] tabular-nums text-slate-500 dark:text-slate-400">
+            {Math.round(pct)}%
+          </span>
+        </div>
+        <p className="text-xs tabular-nums text-slate-500 dark:text-slate-400">de {formatNumber(ally.deuda_total)}</p>
       </td>
-      <td className="px-3 py-3 text-slate-500 dark:text-slate-400">{ally.ruc ?? '—'}</td>
-      <td className="px-3 py-3">{formatCurrency(ally.deuda_total)}</td>
-      <td className="px-3 py-3">{formatCurrency(ally.monto_total_pagado)}</td>
-      <td className="px-3 py-3 font-bold text-slate-950 dark:text-white">
-        {formatCurrency(ally.saldo_pendiente)}
-      </td>
-      <td className="px-3 py-3">
-        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 dark:text-slate-500">
-          <svg fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24" className="h-4 w-4">
-            <path d="m9 18 6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </span>
+      <td className="px-3 py-2 align-middle">
+        <div className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity duration-150 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+          <button
+            aria-label="Ver detalle"
+            className={actionBtn}
+            onClick={(e) => { e.stopPropagation(); onOpen(ally) }}
+            title="Ver detalle"
+            type="button"
+          >
+            <EyeIcon className="h-4 w-4" />
+          </button>
+          <button
+            aria-label="Registrar pago"
+            className={actionBtn}
+            disabled={ally.saldo_pendiente <= 0}
+            onClick={(e) => { e.stopPropagation(); onPay(ally) }}
+            title={ally.saldo_pendiente <= 0 ? 'Sin saldo pendiente' : 'Registrar pago'}
+            type="button"
+          >
+            <BanknotesIcon className="h-4 w-4" />
+          </button>
+          <button
+            aria-label="Enviar recordatorio"
+            className={actionBtn}
+            disabled
+            onClick={(e) => e.stopPropagation()}
+            title="Enviar recordatorio (próximamente)"
+            type="button"
+          >
+            <BellAlertIcon className="h-4 w-4" />
+          </button>
+        </div>
       </td>
     </tr>
   )
 }
+
+function SkeletonRow() {
+  return (
+    <tr aria-hidden="true">
+      <td className="px-4 py-2">
+        <SkeletonBlock className="h-4 w-44" />
+        <SkeletonBlock className="mt-1.5 h-3 w-24" />
+      </td>
+      <td className="px-4 py-2">
+        <SkeletonBlock className="h-4 w-28" />
+        <SkeletonBlock className="mt-1.5 h-3 w-20" />
+      </td>
+      <td className="px-4 py-2"><SkeletonBlock className="h-5 w-24 rounded-full" /></td>
+      <td className="px-4 py-2">
+        <SkeletonBlock className="ml-auto h-4 w-24" />
+        <SkeletonBlock className="ml-auto mt-1.5 h-2 w-28" />
+        <SkeletonBlock className="ml-auto mt-1.5 h-3 w-20" />
+      </td>
+      <td className="px-3 py-2" />
+    </tr>
+  )
+}
+
+// ─── Vista ───────────────────────────────────────────────────────────────────
 
 interface AlliesPaymentsViewProps {
   allies: AliadoResumen[]
@@ -118,13 +363,19 @@ interface AlliesPaymentsViewProps {
   }) => void
   onImportDebts?: (payload: ImportarDeudasPayload) => Promise<ImportarDeudasResult>
   onPageChange: (page: number) => void
+  onPageSizeChange: (pageSize: number) => void
+  /** Carga el detalle sin salir de la lista (drawer). */
+  onPreviewAlly: (allyId: string | number) => Promise<void>
   onRegisterPayment: (payload: RegistrarPagoPayload) => Promise<void>
   onRefresh: () => Promise<void>
+  /** Carga el detalle y abre la página completa. */
   onSelectAlly: (allyId: string | number) => Promise<void>
   page: number
+  pageSize: number
   selectedAllyDetail: AliadoDetalle | null
   selectedAllyId: string | number | null
   totalAllies: number
+  totales?: AliadosListTotales | null
   totalPages: number
 }
 
@@ -132,17 +383,22 @@ export function AlliesPaymentsView({
   allies,
   filters,
   error = null,
+  isDetailLoading = false,
   isLoading = false,
   onFiltersChange,
   onPageChange,
+  onPageSizeChange,
+  onPreviewAlly,
   onRefresh,
+  onRegisterPayment,
   onSelectAlly,
   page,
-  selectedAllyId,
+  pageSize,
+  selectedAllyDetail,
   totalAllies,
+  totales = null,
   totalPages,
 }: AlliesPaymentsViewProps) {
-  const filteredAllies = allies
   const [nameInput, setNameInput] = useState(filters.name ?? '')
   const [bolsas, setBolsas] = useState<string[]>([])
   const [rubros, setRubros] = useState<string[]>([])
@@ -151,6 +407,30 @@ export function AlliesPaymentsView({
   const [exporting, setExporting] = useState(false)
   const [exportingDetalle, setExportingDetalle] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
+  const [updatedAt, setUpdatedAt] = useState(() => Date.now())
+  const [now, setNow] = useState(() => Date.now())
+  const [drawerAllyId, setDrawerAllyId] = useState<string | null>(() => readAllyParam())
+  const [pagoTarget, setPagoTarget] = useState<RegistrarPagoModalTarget | null>(null)
+  const pendingPagoRef = useRef(false)
+  const [overdueOpen, setOverdueOpen] = useState(false)
+  const overdueRef = useRef<HTMLDivElement>(null)
+
+  // Cierra el panel de mora al hacer click afuera o con Esc
+  useEffect(() => {
+    if (!overdueOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (overdueRef.current && !overdueRef.current.contains(e.target as Node)) setOverdueOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOverdueOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [overdueOpen])
 
   useEffect(() => {
     void obtenerFiltrosAliados()
@@ -172,6 +452,7 @@ export function AlliesPaymentsView({
     setNameInput(filters.name ?? '')
   }, [filters.name])
 
+  // Búsqueda por nombre con debounce (~300 ms)
   useEffect(() => {
     const currentName = filters.name ?? ''
     if (nameInput === currentName) return
@@ -183,15 +464,120 @@ export function AlliesPaymentsView({
     return () => window.clearTimeout(timeoutId)
   }, [nameInput, filters.name, onFiltersChange])
 
-  const visibleDebt = useMemo(
-    () => filteredAllies.reduce((total, ally) => total + ally.deuda_total, 0),
-    [filteredAllies],
-  )
+  // "Actualizado hace X min"
+  useEffect(() => {
+    if (!isLoading) setUpdatedAt(Date.now())
+  }, [isLoading])
 
-  const visibleBalance = useMemo(
-    () => filteredAllies.reduce((total, ally) => total + ally.saldo_pendiente, 0),
-    [filteredAllies],
-  )
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  // Link compartido (?aliado=ID): carga el detalle al montar
+  useEffect(() => {
+    const id = readAllyParam()
+    if (id) void onPreviewAlly(id)
+    // solo al montar
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const detailMatches =
+    selectedAllyDetail !== null && drawerAllyId !== null && String(selectedAllyDetail.aliado.aliado_id) === drawerAllyId
+  const { detail: drawerDetail, isLoading: isPlanLoading } = useAllyPlan(detailMatches ? selectedAllyDetail : null)
+  const drawerSummary = drawerAllyId
+    ? allies.find((a) => String(a.aliado_id) === drawerAllyId)
+    : undefined
+  const drawerPaymentTarget = useMemo(() => pickPaymentTarget(drawerDetail), [drawerDetail])
+
+  // "Registrar pago" desde la fila: abre el modal apenas llega el detalle
+  useEffect(() => {
+    if (!pendingPagoRef.current || !drawerDetail) return
+    pendingPagoRef.current = false
+    setPagoTarget(pickPaymentTarget(drawerDetail))
+  }, [drawerDetail])
+
+  const openDrawer = (ally: AliadoResumen) => {
+    const id = String(ally.aliado_id)
+    setDrawerAllyId(id)
+    writeAllyParam(id)
+    void onPreviewAlly(ally.aliado_id)
+  }
+
+  const closeDrawer = () => {
+    setDrawerAllyId(null)
+    writeAllyParam(null)
+  }
+
+  const openFullPage = () => {
+    if (!drawerAllyId) return
+    writeAllyParam(null)
+    void onSelectAlly(drawerAllyId)
+  }
+
+  const payFromRow = (ally: AliadoResumen) => {
+    pendingPagoRef.current = true
+    openDrawer(ally)
+  }
+
+  // KPIs: totales de todos los aliados que cumplen el filtro, no de la página visible.
+  const kpis = useMemo(() => {
+    if (totales) {
+      return {
+        original: totales.deuda_total,
+        balance: totales.saldo_pendiente,
+        paid: totales.monto_pagado,
+        overdue: totales.vencido,
+        overdueAllies: totales.aliados_en_mora,
+        paidPct: percent(totales.monto_pagado, totales.deuda_total),
+      }
+    }
+    let original = 0
+    let balance = 0
+    let paid = 0
+    let overdue = 0
+    let overdueAllies = 0
+    for (const a of allies) {
+      original += a.deuda_total
+      balance += a.saldo_pendiente
+      paid += a.monto_total_pagado
+      if (a.estado_general === 'con_vencimiento') {
+        overdue += a.saldo_pendiente
+        overdueAllies += 1
+      }
+    }
+    return { original, balance, paid, overdue, overdueAllies, paidPct: percent(paid, original) }
+  }, [allies, totales])
+
+  // Filtros activos (solo presentación: no cambia valores ni orden)
+  const bolsaSel = parseCatalogMulti(filters.bolsa)
+  const rubroSel = parseCatalogMulti(filters.rubro)
+  const servicioSel = parseCatalogMulti(filters.servicio)
+  const ejecutivaSel = parseCatalogMulti(filters.ejecutiva)
+  const nameActive = nameInput.trim() !== ''
+  const debtActive = (filters.debtStatus ?? 'all') !== 'all'
+  const allyStatusActive = (filters.allyStatus ?? 'all') !== 'all'
+  const hasActiveFilters =
+    nameActive ||
+    debtActive ||
+    allyStatusActive ||
+    bolsaSel.length > 0 ||
+    rubroSel.length > 0 ||
+    servicioSel.length > 0 ||
+    ejecutivaSel.length > 0
+
+  const clearFilters = () => {
+    setNameInput('')
+    onFiltersChange({
+      name: '',
+      debtStatus: 'all',
+      allyStatus: 'all',
+      bolsa: 'all',
+      rubro: 'all',
+      servicio: 'all',
+      ejecutiva: 'all',
+    })
+  }
 
   const handleExportCsv = async () => {
     setExporting(true)
@@ -235,9 +621,20 @@ export function AlliesPaymentsView({
     }
   }
 
+  const rangeStart = allies.length === 0 ? 0 : (page - 1) * pageSize + 1
+  const rangeEnd = allies.length === 0 ? 0 : rangeStart + allies.length - 1
+  const pageSizeOptions = PAGE_SIZE_OPTIONS.includes(pageSize)
+    ? PAGE_SIZE_OPTIONS
+    : [...PAGE_SIZE_OPTIONS, pageSize].sort((a, b) => a - b)
+  const skeletonRows = Math.min(Math.max(allies.length, 8), 12)
+  const showEmpty = !isLoading && allies.length === 0 && !error
+
+  const thClass =
+    'px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400'
+
   return (
-    <section className="animate-fade-up animate-delay-2 space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-      {/* Header */}
+    <section className="animate-fade-up animate-delay-2 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      {/* Encabezado */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-[11px] font-black uppercase tracking-[0.2em] text-emerald-700 dark:text-emerald-400">Aliados</p>
@@ -245,39 +642,34 @@ export function AlliesPaymentsView({
             Seguimiento general de deuda y pagos
           </h2>
           <p className="mt-0.5 text-xs font-medium text-slate-400 dark:text-slate-500">
-            Revisá el estado de cada aliado y entrá al detalle para ver cuotas y pagos.
+            Revisá el estado de cada aliado y abrí su detalle para ver cuotas y pagos.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           <button
-            className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 dark:hover:bg-emerald-900/50"
-            disabled={exportingDetalle || isLoading}
-            onClick={() => void handleExportDetalleCsv()}
+            aria-label="Actualizar datos"
+            className="inline-flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-medium text-slate-500 transition-colors duration-150 hover:bg-slate-100 hover:text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-loyalty-fresh disabled:cursor-wait dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            disabled={isLoading}
+            onClick={() => void onRefresh()}
             type="button"
           >
-            {exportingDetalle ? 'Exportando...' : 'Exportar desglose pendientes'}
+            <ArrowPathIcon className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+            <span className="tabular-nums">{isLoading ? 'Actualizando…' : relativeMinutes(updatedAt, now)}</span>
           </button>
-          <button
-            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-            disabled={exporting || isLoading}
-            onClick={() => void handleExportCsv()}
-            type="button"
-          >
-            {exporting ? 'Exportando...' : 'Exportar resumen'}
-          </button>
-          <Button className="interactive-lift shrink-0" onClick={() => void onRefresh()} variant="ghost">
-            Actualizar
-          </Button>
+          <ExportMenu
+            disabled={isLoading || exporting || exportingDetalle}
+            exporting={exporting || exportingDetalle}
+            onExportDetalle={() => void handleExportDetalleCsv()}
+            onExportResumen={() => void handleExportCsv()}
+          />
         </div>
       </div>
 
-
-
-
-      {/* Filtros en línea */}
-      <div className="flex flex-wrap items-end gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/60">
-        <div className="flex-1 min-w-[140px]">
+      {/* Filtros (sin cambios funcionales: mismos campos, orden y valores) */}
+      <div className="flex flex-wrap items-end gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-800/60">
+        <div className="min-w-[140px] flex-1">
           <Input
+            className={`${COMPACT_CONTROL} ${nameActive ? ACTIVE_FILTER_BORDER : ''}`}
             id="allyNameFilter"
             label="Aliado"
             onChange={(e) => setNameInput(e.target.value)}
@@ -287,6 +679,7 @@ export function AlliesPaymentsView({
         </div>
         <div className="min-w-[130px]">
           <Select
+            className={`${COMPACT_CONTROL} ${debtActive ? ACTIVE_FILTER_BORDER : ''}`}
             id="debtStatusFilter"
             label="Estado de deuda"
             onChange={(e) => onFiltersChange({
@@ -304,59 +697,52 @@ export function AlliesPaymentsView({
           </Select>
         </div>
         <div className="min-w-[130px]">
-          <Select
+          <MultiSelectDropdown
+            allLabel="Todas"
+            buttonClassName={COMPACT_CONTROL}
             id="bolsaFilter"
             label="Bolsa"
-            onChange={(e) => onFiltersChange({ bolsa: e.target.value })}
-            value={filters.bolsa ?? 'all'}
-          >
-            <option value="all">Todas</option>
-            {bolsas.map((bolsa) => (
-              <option key={bolsa} value={bolsa}>{bolsa}</option>
-            ))}
-          </Select>
+            onChange={(next) => onFiltersChange({ bolsa: serializeCatalogMulti(next) })}
+            options={bolsas}
+            selected={bolsaSel}
+          />
         </div>
         <div className="min-w-[130px]">
-          <Select
+          <MultiSelectDropdown
+            allLabel="Todos"
+            buttonClassName={COMPACT_CONTROL}
             id="rubroFilter"
             label="Rubro"
-            onChange={(e) => onFiltersChange({ rubro: e.target.value })}
-            value={filters.rubro ?? 'all'}
-          >
-            <option value="all">Todos</option>
-            {rubros.map((rubro) => (
-              <option key={rubro} value={rubro}>{rubro}</option>
-            ))}
-          </Select>
+            onChange={(next) => onFiltersChange({ rubro: serializeCatalogMulti(next) })}
+            options={rubros}
+            selected={rubroSel}
+          />
         </div>
         <div className="min-w-[130px]">
-          <Select
+          <MultiSelectDropdown
+            allLabel="Todos"
+            buttonClassName={COMPACT_CONTROL}
             id="servicioFilter"
             label="Tipo de servicio"
-            onChange={(e) => onFiltersChange({ servicio: e.target.value })}
-            value={filters.servicio ?? 'all'}
-          >
-            <option value="all">Todos</option>
-            {servicios.map((svc) => (
-              <option key={svc} value={svc}>{svc}</option>
-            ))}
-          </Select>
+            onChange={(next) => onFiltersChange({ servicio: serializeCatalogMulti(next) })}
+            options={servicios}
+            selected={servicioSel}
+          />
         </div>
         <div className="min-w-[130px]">
-          <Select
+          <MultiSelectDropdown
+            allLabel="Todas"
+            buttonClassName={COMPACT_CONTROL}
             id="ejecutivaFilter"
             label="Ejecutiva"
-            onChange={(e) => onFiltersChange({ ejecutiva: e.target.value })}
-            value={filters.ejecutiva ?? 'all'}
-          >
-            <option value="all">Todas</option>
-            {ejecutivas.map((ej) => (
-              <option key={ej} value={ej}>{ej}</option>
-            ))}
-          </Select>
+            onChange={(next) => onFiltersChange({ ejecutiva: serializeCatalogMulti(next) })}
+            options={ejecutivas}
+            selected={ejecutivaSel}
+          />
         </div>
         <div className="min-w-[130px]">
           <Select
+            className={`${COMPACT_CONTROL} ${allyStatusActive ? ACTIVE_FILTER_BORDER : ''}`}
             id="allyStatusFilter"
             label="Estado del aliado"
             onChange={(e) => onFiltersChange({ allyStatus: e.target.value as 'all' | 'activo' | 'inactivo' })}
@@ -369,6 +755,7 @@ export function AlliesPaymentsView({
         </div>
         <div className="min-w-[150px]">
           <Select
+            className={COMPACT_CONTROL}
             id="periodOrderFilter"
             label="Ordenar por"
             onChange={(e) => onFiltersChange({
@@ -382,13 +769,59 @@ export function AlliesPaymentsView({
             <option value="amount_asc">Saldo: menor a mayor</option>
           </Select>
         </div>
-        <div className="ml-auto flex flex-col items-end gap-0.5 text-xs font-black text-slate-700 dark:text-slate-300">
-          <span>
-            Mostrando: {filteredAllies.length} de {totalAllies}
-          </span>
-          <span>Monto original visible: {formatCurrency(visibleDebt)}</span>
-          <span className="text-slate-500 dark:text-slate-400">Saldo pendiente visible: {formatCurrency(visibleBalance)}</span>
+        {hasActiveFilters ? (
+          <button
+            className="animate-soft-pop mb-2 ml-auto rounded-lg px-2 py-1 text-xs font-semibold text-loyalty-fresh-strong underline-offset-2 transition-colors duration-150 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-loyalty-fresh dark:text-loyalty-fresh-soft"
+            onClick={clearFilters}
+            type="button"
+          >
+            Limpiar filtros
+          </button>
+        ) : null}
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiCard
+          detail={`de ${formatGs(kpis.original)} original`}
+          label="Saldo pendiente"
+          loading={isLoading}
+          value={formatGs(kpis.balance)}
+        />
+        <div ref={overdueRef} className="relative h-full">
+          <KpiCard
+            active={overdueOpen}
+            danger
+            onClick={() => setOverdueOpen((open) => !open)}
+            title="Ver aliados en mora"
+            detail={`${kpis.overdueAllies} ${kpis.overdueAllies === 1 ? 'aliado' : 'aliados'} en mora`}
+            label="Vencido"
+            loading={isLoading}
+            value={formatGs(kpis.overdue)}
+          />
+          {overdueOpen ? (
+            <OverdueAlliesPopover
+              filters={filters}
+              onClose={() => setOverdueOpen(false)}
+              onSelect={(ally) => {
+                setOverdueOpen(false)
+                openDrawer(ally)
+              }}
+            />
+          ) : null}
         </div>
+        <KpiCard
+          detail={`${Math.round(kpis.paidPct)}% del total original`}
+          label="Cobrado"
+          loading={isLoading}
+          value={formatGs(kpis.paid)}
+        />
+        <KpiCard
+          detail={`Mostrando ${allies.length}`}
+          label="Aliados"
+          loading={isLoading}
+          value={formatNumber(totalAllies)}
+        />
       </div>
 
       {error ? (
@@ -403,84 +836,113 @@ export function AlliesPaymentsView({
         </div>
       ) : null}
 
-      {isLoading ? (
-        <div className="animate-soft-pop rounded-xl border border-dashed border-emerald-950/15 bg-emerald-50/45 px-6 py-14 text-center text-sm font-medium text-slate-500 dark:border-emerald-800/30 dark:bg-emerald-900/10 dark:text-slate-400">
-          Cargando aliados y resumen de pagos...
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-100 text-left text-sm dark:divide-slate-700">
-              <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+      {/* Tabla */}
+      <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
+        {showEmpty ? (
+          <div className="animate-soft-pop flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
+            <MagnifyingGlassIcon className="h-8 w-8 text-slate-300 dark:text-slate-600" />
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">No hay aliados con estos filtros</p>
+            {hasActiveFilters ? (
+              <button
+                className="mt-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors duration-150 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-loyalty-fresh dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                onClick={clearFilters}
+                type="button"
+              >
+                Limpiar filtros
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <div className="max-h-[calc(100vh-22rem)] min-h-[20rem] overflow-auto">
+            <table className="w-full min-w-[820px] text-left text-sm">
+              <thead className="sticky top-0 z-10 bg-slate-50 shadow-[0_1px_0_0_rgba(148,163,184,0.25)] dark:bg-slate-800">
                 <tr>
-                  <th className="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Aliado</th>
-                  <th className="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Bolsa</th>
-                  <th className="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Rubro</th>
-                  <th className="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Estado aliado</th>
-                  <th className="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Estado deuda</th>
-                  <th className="px-3 py-3 text-xs font-semibold uppercase tracking-wider">RUC</th>
-                  <th className="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Deuda total</th>
-                  <th className="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Pagado</th>
-                  <th className="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Saldo</th>
-                  <th className="px-3 py-3" />
+                  <th className={`${thClass} w-[30%]`}>Aliado</th>
+                  <th className={`${thClass} w-[20%]`}>Bolsa</th>
+                  <th className={`${thClass} w-[17%]`}>Estado deuda</th>
+                  <th className={`${thClass} w-[23%] text-right`}>Saldo (Gs.)</th>
+                  <th className={`${thClass} w-[10%]`}><span className="sr-only">Acciones</span></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 bg-white text-slate-700 dark:divide-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                {filteredAllies.map((ally) => (
-                  <AllyRow
-                    key={ally.aliado_id}
-                    ally={ally}
-                    isSelected={selectedAllyId === ally.aliado_id}
-                    onSelectAlly={onSelectAlly}
-                  />
-                ))}
+              <tbody className="divide-y divide-slate-200/60 bg-white text-slate-700 dark:divide-white/5 dark:bg-slate-900 dark:text-slate-300">
+                {isLoading
+                  ? Array.from({ length: skeletonRows }, (_, i) => <SkeletonRow key={`sk-${i}`} />)
+                  : allies.map((ally) => (
+                    <AllyRow
+                      key={ally.aliado_id}
+                      ally={ally}
+                      isSelected={drawerAllyId === String(ally.aliado_id)}
+                      onOpen={openDrawer}
+                      onPay={payFromRow}
+                    />
+                  ))}
               </tbody>
             </table>
           </div>
-        </div>
-          {totalPages > 1 ? (
-            <div className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/60">
+        )}
+
+        {/* Paginación */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+          <span className="font-medium tabular-nums">
+            {rangeStart}–{rangeEnd} de {formatNumber(totalAllies)}
+          </span>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5">
+              <span className="text-slate-500 dark:text-slate-400">Filas por página</span>
+              <select
+                aria-label="Filas por página"
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 outline-none transition-colors duration-150 focus:border-loyalty-fresh dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                onChange={(e) => onPageSizeChange(Number(e.target.value))}
+                value={pageSize}
+              >
+                {pageSizeOptions.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+            <div className="flex items-center gap-1">
               <button
-                className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-600 disabled:opacity-40 dark:border-slate-600 dark:text-slate-300"
-                disabled={page <= 1}
+                aria-label="Página anterior"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white transition-colors duration-150 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
+                disabled={page <= 1 || isLoading}
                 onClick={() => onPageChange(page - 1)}
                 type="button"
               >
-                Anterior
+                <ChevronLeftIcon className="h-3.5 w-3.5" />
               </button>
-              {Array.from({ length: totalPages }, (_, idx) => idx + 1)
-                .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
-                .map((p, idx, arr) => (
-                  <span key={`page-${p}`} className="flex items-center gap-2">
-                    {idx > 0 && p - arr[idx - 1] > 1 ? (
-                      <span className="px-1 text-xs text-slate-400 dark:text-slate-500">…</span>
-                    ) : null}
-                    <button
-                      className={`h-9 min-w-9 rounded-md border px-3 text-sm font-black ${
-                        p === page
-                          ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300'
-                          : 'border-slate-300 text-slate-600 dark:border-slate-600 dark:text-slate-300'
-                      }`}
-                      onClick={() => onPageChange(p)}
-                      type="button"
-                    >
-                      {p}
-                    </button>
-                  </span>
-                ))}
+              <span className="min-w-[4.5rem] text-center tabular-nums">Pág. {page} / {totalPages}</span>
               <button
-                className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-600 disabled:opacity-40 dark:border-slate-600 dark:text-slate-300"
-                disabled={page >= totalPages}
+                aria-label="Página siguiente"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white transition-colors duration-150 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
+                disabled={page >= totalPages || isLoading}
                 onClick={() => onPageChange(page + 1)}
                 type="button"
               >
-                Siguiente
+                <ChevronRightIcon className="h-3.5 w-3.5" />
               </button>
             </div>
-          ) : null}
+          </div>
         </div>
-      )}
+      </div>
+
+      {drawerAllyId ? (
+        <AllyDetailDrawer
+          key={drawerAllyId}
+          canRegisterPayment={drawerPaymentTarget !== null}
+          detail={drawerDetail}
+          isLoading={isDetailLoading || isPlanLoading}
+          onClose={closeDrawer}
+          onOpenFullPage={openFullPage}
+          onRegisterPayment={() => setPagoTarget(drawerPaymentTarget)}
+          summary={drawerSummary}
+        />
+      ) : null}
+
+      <RegistrarPagoModal
+        onClose={() => setPagoTarget(null)}
+        onSubmit={onRegisterPayment}
+        open={pagoTarget !== null}
+        saldoAFavorActual={drawerDetail?.resumen.saldo_a_favor ?? 0}
+        target={pagoTarget}
+      />
     </section>
   )
 }

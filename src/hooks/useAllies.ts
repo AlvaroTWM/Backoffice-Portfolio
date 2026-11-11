@@ -23,6 +23,7 @@ import type {
   RefinanciarDeudaPayload,
   AliadoDetalle,
   AliadosListQuery,
+  AliadosListTotales,
   AliadoResumen,
   CrearCompromisoPayload,
   CrearFacturaPayload,
@@ -53,6 +54,7 @@ export function useAllies() {
   const [allies, setAllies] = useState<AliadoResumen[]>([])
   const [totalAllies, setTotalAllies] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
+  const [totales, setTotales] = useState<AliadosListTotales | null>(null)
   const [selectedAllyId, setSelectedAllyId] = useState<string | number | null>(null)
   const [selectedAllyDetail, setSelectedAllyDetail] = useState<AliadoDetalle | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -67,6 +69,7 @@ export function useAllies() {
       setAllies(response.items)
       setTotalAllies(response.total)
       setTotalPages(response.totalPages)
+      setTotales(response.totales ?? null)
     } catch (e) {
       setError(getErrorMessage(e))
     } finally {
@@ -78,6 +81,10 @@ export function useAllies() {
 
   const setPage = (page: number) => {
     setListQuery((prev) => ({ ...prev, page: Math.max(1, page) }))
+  }
+
+  const setPageSize = (pageSize: number) => {
+    setListQuery((prev) => ({ ...prev, pageSize, page: 1 }))
   }
 
   const setNameFilter = (name: string) => {
@@ -304,6 +311,7 @@ export function useAllies() {
     setEjecutivaFilter,
     setNameFilter,
     setPage,
+    setPageSize,
     setPeriodOrder,
     setRubroFilter,
     setServicioFilter,
@@ -311,6 +319,7 @@ export function useAllies() {
     selectedAllyId,
     selectAlly,
     totalAllies,
+    totales,
     totalPages,
     voidPaymentOnCuota,
   }

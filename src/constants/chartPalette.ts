@@ -1,79 +1,61 @@
 /**
- * Paleta de gráficos — alto contraste en light/dark.
- * Light mode usa la paleta de marca ITTI.
+ * Paleta de gráficos — exactamente 4 colores Loyalty (compartidos por todos los charts).
  */
 
-import { BRAND_LIGHT } from './brandColors'
+import { LOYALTY_BRAND } from './brandColors'
+
+/** Orden fijo: Fresh · Jungle · Lavanda · Radian */
+export const CHART_COLORS_4 = [
+  LOYALTY_BRAND.fresh,
+  LOYALTY_BRAND.jungle,
+  LOYALTY_BRAND.lavanda,
+  LOYALTY_BRAND.radian,
+] as const
+
+export function chartColor(index: number): string {
+  return CHART_COLORS_4[((index % 4) + 4) % 4]
+}
+
+export function chartColorsForCount(count: number): string[] {
+  return Array.from({ length: count }, (_, i) => chartColor(i))
+}
 
 export interface ChartPalette {
-  primary:     string
-  secondary:   string
-  accentLine:  string
-  series:      string[]
+  colors: readonly [string, string, string, string]
+  primary: string
+  secondary: string
+  accentLine: string
+  series: string[]
   stack: {
     positive: string
-    neutral:  string
+    neutral: string
     negative: string
   }
   projection: [string, string, string, string]
   tableHeaderBg: string
-  badgeCalm:   { bg: string; text: string }
+  badgeCalm: { bg: string; text: string }
 }
 
 export function getChartPalette(isDark: boolean): ChartPalette {
-  if (isDark) {
-    return {
-      primary:    '#2DD4BF',
-      secondary:  '#34D399',
-      accentLine: '#A5B4FC',
-      series: [
-        '#2DD4BF',
-        '#34D399',
-        '#38BDF8',
-        '#A78BFA',
-        '#FBBF24',
-        '#FB7185',
-        '#4ADE80',
-        '#94A3B8',
-      ],
-      stack: {
-        positive: '#34D399',
-        neutral:  '#FBBF24',
-        negative: '#FB7185',
-      },
-      projection: ['#6EE7B7', '#2DD4BF', '#38BDF8', '#818CF8'],
-      tableHeaderBg: 'rgba(15, 23, 42, 0.55)',
-      badgeCalm: {
-        bg:   'rgba(45, 212, 191, 0.18)',
-        text: '#99F6E4',
-      },
-    }
+  const colors = CHART_COLORS_4
+  const stack = {
+    positive: colors[0],
+    neutral: colors[3],
+    negative: colors[1],
   }
 
   return {
-    primary:    BRAND_LIGHT.ocean,
-    secondary:  BRAND_LIGHT.sky,
-    accentLine: BRAND_LIGHT.navy,
-    series: [
-      BRAND_LIGHT.mint,
-      BRAND_LIGHT.sky,
-      BRAND_LIGHT.ocean,
-      BRAND_LIGHT.navy,
-      '#D97706',
-      '#E11D48',
-      '#16A34A',
-      '#64748B',
-    ],
-    stack: {
-      positive: BRAND_LIGHT.mint,
-      neutral:  '#F59E0B',
-      negative: '#EF4444',
-    },
-    projection: [BRAND_LIGHT.mint, BRAND_LIGHT.sky, BRAND_LIGHT.ocean, BRAND_LIGHT.navy],
-    tableHeaderBg: 'rgba(238, 244, 250, 0.95)',
+    colors,
+    primary: colors[0],
+    secondary: colors[1],
+    accentLine: colors[2],
+    series: [...colors],
+    stack,
+    projection: [colors[0], colors[1], colors[2], colors[3]],
+    tableHeaderBg: isDark ? 'rgba(11, 61, 54, 0.55)' : 'rgba(244, 241, 234, 0.95)',
     badgeCalm: {
-      bg:   'rgba(21, 216, 179, 0.14)',
-      text: BRAND_LIGHT.ocean,
+      bg: isDark ? 'rgba(0, 168, 107, 0.18)' : 'rgba(0, 168, 107, 0.12)',
+      text: isDark ? LOYALTY_BRAND.freshSoft : LOYALTY_BRAND.freshStrong,
     },
   }
 }

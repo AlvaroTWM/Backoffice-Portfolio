@@ -4,17 +4,37 @@
 
 @layer base {
   :root {
-    color: #0f172a;
+    /* Loyalty ueno — tokens (HEX aprox. desde identidad-colores.md) */
+    --loyalty-fresh: #00a86b;
+    --loyalty-fresh-strong: #008f5a;
+    --loyalty-fresh-soft: #c4ffd4;
+    --loyalty-jungle: #0b3d36;
+    --loyalty-jungle-muted: #134e45;
+    --loyalty-night: #0a1614;
+    --loyalty-night-elevated: #12201d;
+    --loyalty-lavanda: #8b8fe8;
+    --loyalty-lavanda-soft: #e8e9fa;
+    --loyalty-radian: #c6e04a;
+    --loyalty-menta: #a8d5c8;
+    --loyalty-beige: #f4f1ea;
+    --loyalty-cool-gray: #8b949e;
+    --loyalty-warm-gray: #6e6b66;
+
+    --loyalty-ease: cubic-bezier(0.16, 1, 0.3, 1);
+    --loyalty-duration: 200ms;
+    --loyalty-duration-enter: 280ms;
+
+    color: var(--loyalty-jungle);
     background:
-      radial-gradient(circle at top left, rgba(196, 255, 212, 0.7), transparent 34%),
-      linear-gradient(180deg, #f3fff7 0%, #eef6f3 100%);
-    font-family: "Inter", sans-serif;
+      radial-gradient(circle at top left, rgba(196, 255, 212, 0.55), transparent 34%),
+      linear-gradient(180deg, #f7fff9 0%, var(--loyalty-beige) 100%);
+    font-family: Inter, system-ui, sans-serif;
   }
 
   .dark {
     color-scheme: dark;
     color: #f1f5f9;
-    background: #0f172a;
+    background: var(--loyalty-night);
   }
 
   body {
@@ -25,15 +45,18 @@
   #root {
     min-height: 100vh;
   }
+
+  ::selection {
+    background: rgba(0, 168, 107, 0.28);
+  }
 }
 
 @layer components {
   @keyframes fade-up {
     from {
       opacity: 0;
-      transform: translateY(18px);
+      transform: translateY(8px);
     }
-
     to {
       opacity: 1;
       transform: translateY(0);
@@ -43,9 +66,8 @@
   @keyframes fade-down {
     from {
       opacity: 0;
-      transform: translateY(-14px);
+      transform: translateY(-6px);
     }
-
     to {
       opacity: 1;
       transform: translateY(0);
@@ -55,35 +77,11 @@
   @keyframes soft-pop {
     from {
       opacity: 0;
-      transform: translateY(10px) scale(0.98);
+      transform: translateY(6px) scale(0.98);
     }
-
     to {
       opacity: 1;
       transform: translateY(0) scale(1);
-    }
-  }
-
-  @keyframes float-card {
-    0%,
-    100% {
-      transform: translateX(-50%) translateY(0) rotate(-1deg);
-    }
-
-    50% {
-      transform: translateX(-50%) translateY(-12px) rotate(-2deg);
-    }
-  }
-
-  @keyframes card-enter {
-    from {
-      opacity: 0;
-      transform: translateX(-50%) translateY(18px) rotate(-1deg);
-    }
-
-    to {
-      opacity: 1;
-      transform: translateX(-50%) translateY(0) rotate(-1deg);
     }
   }
 
@@ -91,59 +89,62 @@
     from {
       transform: translateX(-100%);
     }
-
     to {
       transform: translateX(100%);
     }
   }
 
   .animate-fade-up {
-    animation: fade-up 720ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    animation: fade-up var(--loyalty-duration-enter) var(--loyalty-ease) both;
   }
 
   .animate-fade-down {
-    animation: fade-down 680ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    animation: fade-down var(--loyalty-duration-enter) var(--loyalty-ease) both;
   }
 
   .animate-soft-pop {
-    animation: soft-pop 620ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    animation: soft-pop var(--loyalty-duration-enter) var(--loyalty-ease) both;
   }
 
   .animate-delay-1 {
-    animation-delay: 80ms;
+    animation-delay: 60ms;
   }
-
   .animate-delay-2 {
-    animation-delay: 160ms;
+    animation-delay: 120ms;
   }
-
   .animate-delay-3 {
+    animation-delay: 180ms;
+  }
+  .animate-delay-4 {
     animation-delay: 240ms;
   }
-
-  .animate-delay-4 {
-    animation-delay: 340ms;
-  }
-
   .animate-delay-5 {
-    animation-delay: 460ms;
+    animation-delay: 300ms;
   }
-
   .animate-delay-6 {
-    animation-delay: 580ms;
+    animation-delay: 360ms;
   }
 
+  /* Transiciones mínimas — propiedades concretas (no `all`) */
   .interactive-lift {
     transition:
-      transform 180ms ease,
-      border-color 180ms ease,
-      background-color 180ms ease,
-      box-shadow 180ms ease,
-      color 180ms ease;
+      transform var(--loyalty-duration) var(--loyalty-ease),
+      border-color var(--loyalty-duration) var(--loyalty-ease),
+      background-color var(--loyalty-duration) var(--loyalty-ease),
+      box-shadow var(--loyalty-duration) var(--loyalty-ease),
+      color var(--loyalty-duration) var(--loyalty-ease);
   }
 
   .interactive-lift:hover {
-    transform: translateY(-2px);
+    transform: translateY(-1px);
+  }
+
+  .interactive-lift:active {
+    transform: scale(0.98);
+  }
+
+  .loyalty-press:active {
+    transform: scale(0.97);
   }
 
   .surface-shine {
@@ -159,8 +160,8 @@
     background: linear-gradient(
       110deg,
       transparent 0%,
-      transparent 36%,
-      rgba(255, 255, 255, 0.48) 48%,
+      transparent 40%,
+      rgba(255, 255, 255, 0.35) 50%,
       transparent 60%,
       transparent 100%
     );
@@ -168,39 +169,105 @@
   }
 
   .surface-shine:hover::after {
-    animation: shimmer-line 900ms ease;
+    animation: shimmer-line 700ms var(--loyalty-ease);
   }
 
   .app-shell {
     background:
-      radial-gradient(circle at 18% 0%, rgba(187, 247, 208, 0.5), transparent 28%),
-      radial-gradient(circle at 82% 12%, rgba(220, 252, 231, 0.42), transparent 30%),
-      linear-gradient(180deg, #f4fff8 0%, #eef4f7 100%);
+      radial-gradient(circle at 18% 0%, rgba(196, 255, 212, 0.45), transparent 28%),
+      radial-gradient(circle at 82% 12%, rgba(168, 213, 200, 0.28), transparent 30%),
+      linear-gradient(180deg, #f7fff9 0%, var(--loyalty-beige) 100%);
   }
 
   .dark .app-shell {
     background:
-      radial-gradient(circle at 18% 0%, rgba(6, 78, 59, 0.25), transparent 28%),
-      radial-gradient(circle at 82% 12%, rgba(6, 78, 59, 0.15), transparent 30%),
-      linear-gradient(180deg, #0f172a 0%, #0f1f2e 100%);
+      radial-gradient(circle at 18% 0%, rgba(0, 168, 107, 0.12), transparent 28%),
+      radial-gradient(circle at 82% 12%, rgba(11, 61, 54, 0.35), transparent 30%),
+      linear-gradient(180deg, var(--loyalty-night) 0%, var(--loyalty-night-elevated) 100%);
   }
 
   .dashboard-page {
     background:
-      radial-gradient(circle at 16% 8%, rgba(190, 214, 255, 0.7), transparent 24%),
-      radial-gradient(circle at 86% 18%, rgba(235, 241, 255, 0.88), transparent 28%),
-      radial-gradient(circle at 68% 72%, rgba(228, 236, 255, 0.72), transparent 24%),
-      linear-gradient(180deg, #eef4ff 0%, #f7faff 100%);
+      radial-gradient(circle at 16% 8%, rgba(196, 255, 212, 0.55), transparent 24%),
+      radial-gradient(circle at 86% 18%, rgba(232, 233, 250, 0.55), transparent 28%),
+      linear-gradient(180deg, #f3fff8 0%, var(--loyalty-beige) 100%);
+  }
+
+  .dark .dashboard-page {
+    background:
+      radial-gradient(circle at 16% 8%, rgba(0, 168, 107, 0.1), transparent 24%),
+      linear-gradient(180deg, var(--loyalty-night) 0%, var(--loyalty-jungle) 100%);
   }
 
   .dashboard-shell {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0.9) 100%);
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.78) 0%,
+      rgba(255, 255, 255, 0.92) 100%
+    );
+  }
+
+  .dark .dashboard-shell {
+    background: linear-gradient(
+      180deg,
+      rgba(18, 32, 29, 0.88) 0%,
+      rgba(10, 22, 20, 0.95) 100%
+    );
   }
 
   .dashboard-frame {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 251, 255, 0.96) 100%);
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.96) 0%,
+      rgba(247, 255, 249, 0.96) 100%
+    );
+  }
+
+  .dark .dashboard-frame {
+    background: linear-gradient(
+      180deg,
+      rgba(18, 32, 29, 0.96) 0%,
+      rgba(11, 61, 54, 0.4) 100%
+    );
+  }
+
+  .landing-tool-link {
+    position: absolute;
+    right: 1.25rem;
+    bottom: 1.5rem;
+    z-index: 20;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: rgb(71 85 105);
+    text-decoration: none;
+    transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .landing-tool-link:active {
+    transform: scale(0.97);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .landing-tool-link:hover {
+      color: rgb(15 23 42);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .landing-tool-link,
+    .landing-tool-link:active {
+      transition: none;
+      transform: none;
+    }
+  }
+
+  @media (min-width: 640px) {
+    .landing-tool-link {
+      right: 2rem;
+    }
   }
 
   .landing-shell::before {
@@ -209,62 +276,155 @@
     inset: 0;
     z-index: -1;
     background:
-      radial-gradient(circle at 14% 0%, rgba(187, 247, 208, 0.72), transparent 30%),
-      radial-gradient(circle at 80% 20%, rgba(220, 252, 231, 0.5), transparent 28%),
-      linear-gradient(135deg, #f0fff5 0%, #ffffff 58%, #f7fffb 100%);
+      radial-gradient(circle at 14% 0%, rgba(196, 255, 212, 0.65), transparent 30%),
+      radial-gradient(circle at 80% 20%, rgba(168, 213, 200, 0.4), transparent 28%),
+      linear-gradient(135deg, #f0fff5 0%, #ffffff 58%, var(--loyalty-beige) 100%);
   }
 
-  .landing-hero {
+  /* Wallet del login: cerrada asoman la negra y la verde; abierta, collage disperso. */
+  .wallet {
+    --wallet-ease: cubic-bezier(0.23, 1, 0.32, 1);
+    --wallet-launch: cubic-bezier(0.34, 1.36, 0.64, 1);
+    /* Tope por alto: el collage abierto entra en 1280×640 sin cortar tarjetas. */
+    --wallet-w: min(64vw, 17rem, 27vh);
     position: relative;
-    width: 100%;
-    min-height: clamp(25rem, 54vh, 38rem);
-    display: grid;
-    place-items: center;
+    width: var(--wallet-w);
+    aspect-ratio: 1;
+    margin-top: clamp(4.5rem, 13vh, 6.75rem);
+    font-size: calc(var(--wallet-w) / 26);
   }
 
-  .landing-hero-copy {
-    position: relative;
-    z-index: 2;
-    padding-top: clamp(7rem, 17vw, 13rem);
-  }
-
-  .landing-card-stage {
+  /* Sin filter en .wallet ni en las tarjetas: rasteriza los SVG y los deja borrosos. */
+  .wallet-back {
     position: absolute;
-    left: 50%;
-    top: clamp(0.25rem, 4vh, 2.5rem);
-    z-index: 1;
-    width: min(78vw, 34rem);
-    height: clamp(11rem, 24vw, 17rem);
-    filter: drop-shadow(0 34px 48px rgba(6, 78, 59, 0.18));
-    pointer-events: none;
-    transform: translateX(-50%);
-    animation:
-      card-enter 780ms cubic-bezier(0.2, 0.8, 0.2, 1) 120ms both,
-      float-card 7s ease-in-out 980ms infinite;
-  }
-
-  .landing-card-image {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: min(86vw, 35rem);
-    max-width: none;
-    opacity: 0.86;
-    transform: translate(-50%, -50%) rotate(-1deg);
-    transform-origin: center;
-  }
-
-  .landing-card-placeholder {
-    height: clamp(11rem, 24vw, 17rem);
-    border-radius: 1.6rem;
-    border: 1px solid rgba(15, 23, 42, 0.08);
-    background:
-      radial-gradient(circle at 22% 24%, rgba(255, 255, 255, 0.75), transparent 35%),
-      linear-gradient(135deg, rgba(5, 150, 105, 0.92), rgba(16, 185, 129, 0.7)),
-      linear-gradient(130deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.95));
+    inset: 0;
+    z-index: 0;
+    border-radius: 13%;
+    background: #3b32b0;
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.18),
-      0 12px 30px rgba(6, 78, 59, 0.2);
+      inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+      0 18px 24px rgba(49, 38, 160, 0.28);
+  }
+
+  .wallet-card {
+    position: absolute;
+    left: var(--left);
+    top: var(--top);
+    z-index: var(--z, 1);
+    width: 42%;
+    aspect-ratio: 54 / 85.6;
+    transform-origin: 50% 50%;
+    transform: var(--rest);
+    opacity: var(--rest-opacity, 1);
+    pointer-events: none;
+    /* Mismo radio que el rect del viewBox (rx 5.15 sobre 54×85.6). */
+    border-radius: 9.54% / 6.02%;
+    box-shadow:
+      0 16px 18px rgba(15, 23, 42, 0.15),
+      0 3px 5px rgba(15, 23, 42, 0.08);
+    transition-property: transform, opacity;
+    transition-duration: 250ms, 190ms;
+    transition-timing-function: var(--wallet-ease), var(--wallet-ease);
+    transition-delay: var(--close-stagger, 0ms), var(--close-stagger, 0ms);
+  }
+
+  /* Rayada y gris quedan dentro del bolsillo hasta que se abre. */
+  .wallet-card--striped {
+    --left: 4%;
+    --top: 34%;
+    --z: 3;
+    --rest: translate(0px, 76%) rotate(0deg);
+    --rest-opacity: 0;
+    --open: translate(-52%, -114%) rotate(-14deg);
+    --stagger: 50ms;
+    --close-stagger: 60ms;
+  }
+
+  .wallet-card--black {
+    --left: 6%;
+    --top: 20%;
+    --z: 2;
+    --rest: translate(0px, 0px) rotate(0deg);
+    --open: translate(76%, -120%) rotate(10deg);
+    --stagger: 0ms;
+    --close-stagger: 90ms;
+  }
+
+  .wallet-card--gray {
+    --left: 38%;
+    --top: 34%;
+    --z: 1;
+    --rest: translate(0px, 78%) rotate(0deg);
+    --rest-opacity: 0;
+    --open: translate(-205%, -45%) rotate(22deg);
+    --stagger: 150ms;
+    --close-stagger: 0ms;
+  }
+
+  .wallet-card--bank {
+    --left: 52%;
+    --top: 20%;
+    --z: 4;
+    --rest: translate(0px, 0px) rotate(0deg);
+    --open: translate(43%, -78%) rotate(-4deg);
+    --stagger: 100ms;
+    --close-stagger: 30ms;
+  }
+
+  .wallet-pocket {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    width: 100%;
+    height: 100%;
+    fill: #4c42dc;
+    pointer-events: none;
+    filter: drop-shadow(0 -5px 8px rgba(49, 38, 160, 0.28));
+  }
+
+  .landing-cta {
+    z-index: 6;
+  }
+
+  /* Se abre al apuntar a la wallet o al botón de login; con teclado, al enfocar el botón. */
+  @media (hover: hover) and (pointer: fine) {
+    .wallet:hover .wallet-card,
+    .landing-shell:has(.landing-cta:hover) .wallet-card {
+      transform: var(--open);
+      opacity: 1;
+      transition-duration: 500ms, 360ms;
+      transition-timing-function: var(--wallet-launch), var(--wallet-ease);
+      transition-delay: var(--stagger), var(--stagger);
+    }
+  }
+
+  /* Teclado, o redirigiendo a Okta: queda abierta. */
+  .landing-shell:has(.landing-cta:focus-visible) .wallet-card,
+  .landing-shell:has(.landing-cta:disabled) .wallet-card {
+    transform: var(--open);
+    opacity: 1;
+    transition-duration: 500ms, 360ms;
+    transition-timing-function: var(--wallet-launch), var(--wallet-ease);
+    transition-delay: var(--stagger), var(--stagger);
+  }
+
+  /* Feedback de presión: el botón es invisible, así que se hunde el bolsillo y su texto. */
+  .wallet-pocket,
+  .landing-cta {
+    transform-origin: 50% 100%;
+    transition: transform 160ms var(--wallet-ease);
+  }
+  .landing-shell:has(.landing-cta:active:not(:disabled)) .wallet-pocket,
+  .landing-cta:active:not(:disabled) {
+    transform: scale(0.985);
+  }
+
+  /* Sin hover (touch) la animación nunca se vería: se muestra abierta. */
+  @media (hover: none) {
+    .wallet-card {
+      transform: var(--open);
+      opacity: 1;
+    }
   }
 
   .login-panel {
@@ -277,9 +437,9 @@
     inset: 0;
     z-index: -1;
     background:
-      radial-gradient(circle at 18% 22%, rgba(187, 247, 208, 0.5), transparent 26%),
-      radial-gradient(circle at 82% 18%, rgba(209, 250, 229, 0.65), transparent 30%),
-      linear-gradient(180deg, #f3fff7 0%, #eef6f3 100%);
+      radial-gradient(circle at 18% 22%, rgba(196, 255, 212, 0.45), transparent 26%),
+      radial-gradient(circle at 82% 18%, rgba(168, 213, 200, 0.5), transparent 30%),
+      linear-gradient(180deg, #f3fff7 0%, var(--loyalty-beige) 100%);
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -292,9 +452,10 @@
       transition-duration: 1ms !important;
     }
 
-    .landing-card-stage {
-      opacity: 1;
-      transform: translateX(-50%);
+    .wallet-card {
+      transition-property: opacity !important;
+      transition-duration: 160ms !important;
+      transition-delay: 0ms !important;
     }
   }
 }
