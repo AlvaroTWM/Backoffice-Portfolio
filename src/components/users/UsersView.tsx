@@ -275,7 +275,7 @@ export function UsersView() {
               onChange={(e) => setNewNombre(e.target.value)} />
           </Field>
           <Field label="Email corporativo">
-            <input className={inputCls} type="email" placeholder="maria@itti.digital" value={newEmail}
+            <input className={inputCls} type="email" placeholder="maria@empresa.com" value={newEmail}
               onChange={(e) => setNewEmail(e.target.value)} />
           </Field>
           <Field label="Rol">

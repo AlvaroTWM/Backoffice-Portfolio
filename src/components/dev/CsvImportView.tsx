@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { ArrowDownTrayIcon, ArrowUpTrayIcon, CheckCircleIcon, ExclamationTriangleIcon, XCircleIcon } from '@heroicons/react/24/outline'
 import { getStoredJwt } from '../../services/auth'
+import { ManualEntryPanel } from './ManualEntryPanel'
 
 const API_BASE = import.meta.env.VITE_API_URL?.trim() ?? ''
 
@@ -12,6 +13,7 @@ type ImportMode =
   | 'update-aliados'
   | 'update-deudas'
   | 'update-ejecutivas'
+  | 'clientes'
 
 type ParsedRow = Record<string, string>
 
@@ -21,6 +23,13 @@ interface ChangeEntry {
   field: string
   from:  string
   to:    string
+}
+
+interface LoteProgress {
+  lote: number
+  totalLotes: number
+  desde: number
+  hasta: number
 }
 
 interface ImportResult {
@@ -37,6 +46,42 @@ interface ImportResult {
   errors:   string[]
   changes?: ChangeEntry[]
   dryRun?:  boolean
+}
+
+async function readImportStream(
+  res: Response,
+  onProgress: (progress: LoteProgress) => void,
+): Promise<Partial<ImportResult> | null> {
+  if (!res.body) return null
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let last: Partial<ImportResult> | null = null
+
+  const consume = (line: string) => {
+    if (!line.trim()) return
+    const event = JSON.parse(line) as Partial<ImportResult> & LoteProgress & { type?: string }
+    if (event.type === 'progress') {
+      onProgress({ lote: event.lote, totalLotes: event.totalLotes, desde: event.desde, hasta: event.hasta })
+      return
+    }
+    if (event.type === 'error') {
+      last = { message: event.message || 'No se pudo importar el archivo.', total: 0, inserted: 0, updated: 0, errors: [event.message || 'No se pudo importar el archivo.'] }
+      return
+    }
+    last = event
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) consume(line)
+    if (done) break
+  }
+  if (buffer.trim()) consume(buffer)
+  return last
 }
 
 function parseMontoPreview(raw: string | undefined): number {
@@ -105,6 +150,14 @@ const UPDATE_EJECUTIVAS_ALIASES: Record<string, string> = {
   ejecutiva: 'ejecutiva', ejecutiva_nombre: 'ejecutiva',
 }
 
+const CLIENTES_ALIASES: Record<string, string> = {
+  cod_persona: 'cod_persona',
+  cedula: 'cedula', cédula: 'cedula',
+  campaña: 'campaña', campana: 'campaña',
+  'informacion adicional': 'informacion adicional',
+  'información adicional': 'informacion adicional',
+}
+
 const ALIADOS_METRICS_COLS = ['monto_compra', 'absorbe_ueno', 'deuda_total', 'clientes', 'trx']
 const ALIADOS_DISPLAY_COLS = [
   'cod_aliado', 'deuda_id', 'aliado', 'bolsa', 'rubro', 'estado_aliado', 'estado_deuda',
@@ -115,6 +168,7 @@ const PAGOS_DISPLAY_COLS = ['deuda_id', 'cod_aliado', 'num_factura', 'nro_cuota'
 const UPDATE_ALIADOS_COLS = ['cod_aliado', 'aliado', 'bolsa', 'rubro', 'estado_aliado', 'ruc', 'cod_persona', 'ejecutiva']
 const UPDATE_DEUDAS_COLS = ['deuda_id', 'cod_aliado', 'periodo', 'servicio', 'estado_deuda', 'deuda_total']
 const UPDATE_EJECUTIVAS_COLS = ['cod_aliado', 'mes', 'ejecutiva']
+const CLIENTES_COLS = ['cod_persona', 'cedula', 'campaña', 'informacion adicional']
 
 const MODE_CONFIG: Record<ImportMode, {
   title: string
@@ -192,15 +246,26 @@ const MODE_CONFIG: Record<ImportMode, {
     columnHint: 'Mes en formato YYYY-MM o "Mes Año" (ej. 2026-09 o Septiembre 2026).',
     isUpdate: true,
   },
+  clientes: {
+    title: 'Importar clientes',
+    description: 'Subí un .xlsx con clientes de la base única. Varias filas del mismo cod_persona suman campañas e informaciones. Si el cliente ya existe, actualiza la cédula y reemplaza las listas que vengan en el archivo.',
+    endpoint: '/api/dev/import-clientes',
+    displayCols: CLIENTES_COLS,
+    aliases: CLIENTES_ALIASES,
+    importLabel: 'Importar clientes a la base de datos',
+    columnHint: 'Columnas: cod_persona, cedula, campaña, informacion adicional. cedula es obligatoria por cliente. campaña hasta 100 caracteres, informacion adicional hasta 500.',
+  },
 }
 
-const MODE_TABS: { id: ImportMode; label: string; adminOnly?: boolean }[] = [
+const MODE_TABS: { id: ImportMode | 'manual'; label: string; adminOnly?: boolean }[] = [
   { id: 'aliados',          label: 'Importar aliados' },
   { id: 'facturas',         label: 'Asignar facturas' },
   { id: 'pagos',            label: 'Pagos masivos' },
+  { id: 'clientes',         label: 'Importar clientes' },
   { id: 'update-aliados',   label: 'Actualizar aliados',   adminOnly: true },
   { id: 'update-deudas',    label: 'Actualizar deudas',    adminOnly: true },
   { id: 'update-ejecutivas', label: 'Actualizar ejecutivas', adminOnly: true },
+  { id: 'manual',          label: 'Carga manual',         adminOnly: true },
 ]
 
 function parseXlsx(buffer: ArrayBuffer, aliases: Record<string, string>, displayCols: string[]) {
@@ -245,6 +310,7 @@ const TEMPLATE_EXAMPLES: Partial<Record<ImportMode, Record<string, string>>> = {
     nro_cuota: '1', monto_pagado: '500000', fecha_pago: '2026-09-10', referencia: 'TRX-001', medio_pago: 'Transferencia',
   },
   'update-deudas': { deuda_id: '100523', cod_aliado: '12345', periodo: 'Septiembre 2026', servicio: 'upys', estado_deuda: 'Pendiente', deuda_total: '1500000' },
+  clientes: { cod_persona: '1596001', cedula: '4567890', campaña: 'Campaña octubre', 'informacion adicional': 'Sin campañas activas' },
 }
 
 function downloadTemplate(cols: string[], filename: string, example?: Record<string, string>) {
@@ -265,6 +331,7 @@ interface CsvImportViewProps {
 export function CsvImportView({ canUseUpdateTabs = false, roleLabel = 'Operaciones' }: CsvImportViewProps) {
   const inputRef                    = useRef<HTMLInputElement>(null)
   const [mode, setMode]             = useState<ImportMode>('aliados')
+  const [manualOpen, setManualOpen] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [file, setFile]             = useState<File | null>(null)
   const [rows, setRows]             = useState<ParsedRow[]>([])
@@ -274,6 +341,7 @@ export function CsvImportView({ canUseUpdateTabs = false, roleLabel = 'Operacion
   const [isExporting, setIsExporting]   = useState(false)
   const [result, setResult]         = useState<ImportResult | null>(null)
   const [previewDone, setPreviewDone] = useState(false)
+  const [loteProgress, setLoteProgress] = useState<LoteProgress | null>(null)
 
   const config = MODE_CONFIG[mode]
   const visibleTabs = MODE_TABS.filter((t) => !t.adminOnly || canUseUpdateTabs)
@@ -285,6 +353,7 @@ export function CsvImportView({ canUseUpdateTabs = false, roleLabel = 'Operacion
     setParseError(null)
     setResult(null)
     setPreviewDone(false)
+    setLoteProgress(null)
     if (inputRef.current) inputRef.current.value = ''
   }
 
@@ -350,6 +419,7 @@ export function CsvImportView({ canUseUpdateTabs = false, roleLabel = 'Operacion
   async function submitFile(dryRun: boolean) {
     if (!file) return
     setIsSubmitting(true)
+    setLoteProgress(null)
     if (!dryRun) setResult(null)
     try {
       const token    = getStoredJwt()
@@ -362,14 +432,44 @@ export function CsvImportView({ canUseUpdateTabs = false, roleLabel = 'Operacion
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body:    formData,
       })
-      const data = (await res.json()) as ImportResult
-      setResult(data)
+      const streamed = mode === 'clientes' && !dryRun && (res.headers.get('content-type') ?? '').includes('ndjson')
+      if (streamed) {
+        const data = await readImportStream(res, setLoteProgress)
+        if (!data || !Array.isArray(data.errors)) {
+          const message = data?.message || 'No se pudo importar el archivo.'
+          setResult({
+            message,
+            total: data?.total ?? 0,
+            inserted: data?.inserted ?? 0,
+            updated: data?.updated ?? 0,
+            errors: Array.isArray(data?.errors) ? data.errors : [message],
+          })
+          return
+        }
+        setResult(data as ImportResult)
+        setPreviewDone(false)
+        return
+      }
+      const data = (await res.json().catch(() => null)) as Partial<ImportResult> | null
+      if (!res.ok || !data || !Array.isArray(data.errors)) {
+        const message = data?.message || 'No se pudo importar el archivo.'
+        setResult({
+          message,
+          total: data?.total ?? 0,
+          inserted: data?.inserted ?? 0,
+          updated: data?.updated ?? 0,
+          errors: Array.isArray(data?.errors) ? data.errors : [message],
+        })
+        return
+      }
+      setResult(data as ImportResult)
       if (dryRun) setPreviewDone(true)
       else setPreviewDone(false)
     } catch {
       setResult({ message: 'Error de red al enviar el archivo.', total: 0, inserted: 0, updated: 0, errors: [] })
     } finally {
       setIsSubmitting(false)
+      setLoteProgress(null)
     }
   }
 
@@ -397,6 +497,7 @@ export function CsvImportView({ canUseUpdateTabs = false, roleLabel = 'Operacion
   }
 
   const previewRows = rows.slice(0, 6)
+  const resultErrors = result?.errors ?? []
   const importSummary = mode === 'aliados' ? summarizeAliadosImportRows(rows) : null
   const isUpdateMode = Boolean(config.isUpdate)
   const useDryRunFlow = isUpdateMode || Boolean(config.supportsDryRun)
@@ -420,11 +521,18 @@ export function CsvImportView({ canUseUpdateTabs = false, roleLabel = 'Operacion
           <button
             key={tab.id}
             className={`rounded-lg px-3 py-2 text-xs font-bold transition ${
-              mode === tab.id
+              (tab.id === 'manual' ? manualOpen : !manualOpen && mode === tab.id)
                 ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
                 : 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400'
             }`}
-            onClick={() => switchMode(tab.id)}
+            onClick={() => {
+              if (tab.id === 'manual') {
+                setManualOpen(true)
+                return
+              }
+              setManualOpen(false)
+              switchMode(tab.id)
+            }}
             type="button"
           >
             {tab.label}
@@ -432,6 +540,8 @@ export function CsvImportView({ canUseUpdateTabs = false, roleLabel = 'Operacion
         ))}
       </div>
 
+      {manualOpen ? <ManualEntryPanel /> : (
+      <>
       <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
         <p className="text-sm font-semibold text-slate-800 dark:text-white">{config.title}</p>
         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{config.description}</p>
@@ -594,27 +704,38 @@ export function CsvImportView({ canUseUpdateTabs = false, roleLabel = 'Operacion
                   )}
                 </>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => void submitFile(false)}
-                  disabled={isSubmitting}
-                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50 dark:bg-emerald-500 dark:hover:bg-emerald-600"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <svg className="size-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                      </svg>
-                      Procesando {rows.length} filas...
-                    </>
-                  ) : (
-                    <>
-                      <ArrowUpTrayIcon className="size-4" />
-                      {config.importLabel} ({rows.length})
-                    </>
-                  )}
-                </button>
+                <div className="flex w-full flex-col gap-2">
+                  {isSubmitting && mode === 'clientes' ? (
+                    <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                      {loteProgress && loteProgress.lote > 0
+                        ? `Cargando lote ${loteProgress.lote} de ${loteProgress.totalLotes} · filas ${loteProgress.desde}–${loteProgress.hasta}`
+                        : 'Leyendo el archivo...'}
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => void submitFile(false)}
+                    disabled={isSubmitting}
+                    className="inline-flex w-fit items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <svg className="size-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        {loteProgress && loteProgress.lote > 0
+                          ? `Lote ${loteProgress.lote} de ${loteProgress.totalLotes}`
+                          : `Procesando ${rows.length} filas...`}
+                      </>
+                    ) : (
+                      <>
+                        <ArrowUpTrayIcon className="size-4" />
+                        {config.importLabel} ({rows.length})
+                      </>
+                    )}
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -623,12 +744,12 @@ export function CsvImportView({ canUseUpdateTabs = false, roleLabel = 'Operacion
 
       {result && (
         <div className={`space-y-3 rounded-2xl border p-5 ${
-          result.errors.length > 0
+          resultErrors.length > 0
             ? 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20'
             : 'border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-900/20'
         }`}>
           <div className="flex items-start gap-2">
-            {result.errors.length > 0
+            {resultErrors.length > 0
               ? <ExclamationTriangleIcon className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-400" />
               : <CheckCircleIcon className="mt-0.5 size-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
             }
@@ -700,9 +821,9 @@ export function CsvImportView({ canUseUpdateTabs = false, roleLabel = 'Operacion
               <p className="text-xl font-black text-slate-400">{result.total}</p>
               <p className="text-xs text-slate-500">Total filas</p>
             </div>
-            {result.errors.length > 0 && (
+            {resultErrors.length > 0 && (
               <div className="text-center">
-                <p className="text-xl font-black text-rose-500">{result.errors.length}</p>
+                <p className="text-xl font-black text-rose-500">{resultErrors.length}</p>
                 <p className="text-xs text-slate-500">Errores</p>
               </div>
             )}
@@ -733,10 +854,10 @@ export function CsvImportView({ canUseUpdateTabs = false, roleLabel = 'Operacion
             </div>
           )}
 
-          {result.errors.length > 0 && (
+          {resultErrors.length > 0 && (
             <div className="max-h-40 overflow-y-auto rounded-lg bg-white/60 p-3 dark:bg-slate-900/40">
               <p className="mb-1 text-xs font-semibold text-rose-600 dark:text-rose-400">Errores</p>
-              {result.errors.map((e, i) => (
+              {resultErrors.map((e, i) => (
                 <p key={i} className="text-xs text-rose-600 dark:text-rose-400">{e}</p>
               ))}
             </div>
@@ -769,6 +890,8 @@ export function CsvImportView({ canUseUpdateTabs = false, roleLabel = 'Operacion
             </button>
           )}
         </div>
+      )}
+      </>
       )}
     </section>
   )

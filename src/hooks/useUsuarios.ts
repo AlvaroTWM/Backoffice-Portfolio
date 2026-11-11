@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { isPortfolioDemo } from '../config/portfolio'
-import { portfolioAwareFetch } from '../services/portfolioDemo/fetch'
+import { getStoredJwt } from '../services/auth'
 
 export interface Usuario {
   user_id:    string
@@ -22,6 +21,16 @@ export const ROLE_LABELS: Record<UsuarioRole, string> = {
 
 export const ROLE_ORDER: UsuarioRole[] = ['admin', 'gerencia', 'operaciones', 'alianzas']
 
+const API_BASE = import.meta.env.VITE_API_URL?.trim() ?? ''
+
+function authHeaders() {
+  const token = getStoredJwt()
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+}
+
 export function useUsuarios() {
   const [usuarios, setUsuarios]   = useState<Usuario[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -31,7 +40,7 @@ export function useUsuarios() {
     setIsLoading(true)
     setError(null)
     try {
-      const res = await portfolioAwareFetch('/api/usuarios')
+      const res = await fetch(`${API_BASE}/api/usuarios`, { headers: authHeaders() })
       if (!res.ok) throw new Error('Error al obtener usuarios.')
       const data = (await res.json()) as { usuarios: Usuario[] }
       setUsuarios(data.usuarios)
@@ -45,12 +54,9 @@ export function useUsuarios() {
   useEffect(() => { void fetchUsuarios() }, [fetchUsuarios])
 
   const createUsuario = useCallback(async (payload: { email: string; nombre: string; rol: UsuarioRole }) => {
-    if (isPortfolioDemo) {
-      await fetchUsuarios()
-      return
-    }
-    const res = await portfolioAwareFetch('/api/usuarios', {
+    const res = await fetch(`${API_BASE}/api/usuarios`, {
       method: 'POST',
+      headers: authHeaders(),
       body:    JSON.stringify(payload),
     })
     if (!res.ok) {
@@ -61,12 +67,9 @@ export function useUsuarios() {
   }, [fetchUsuarios])
 
   const updateUsuario = useCallback(async (id: string, payload: Partial<{ email: string; nombre: string; rol: UsuarioRole }>) => {
-    if (isPortfolioDemo) {
-      await fetchUsuarios()
-      return
-    }
-    const res = await portfolioAwareFetch(`/api/usuarios/${id}`, {
+    const res = await fetch(`${API_BASE}/api/usuarios/${id}`, {
       method:  'PATCH',
+      headers: authHeaders(),
       body:    JSON.stringify(payload),
     })
     if (!res.ok) {
@@ -77,12 +80,9 @@ export function useUsuarios() {
   }, [fetchUsuarios])
 
   const deleteUsuario = useCallback(async (id: string) => {
-    if (isPortfolioDemo) {
-      await fetchUsuarios()
-      return
-    }
-    const res = await portfolioAwareFetch(`/api/usuarios/${id}`, {
+    const res = await fetch(`${API_BASE}/api/usuarios/${id}`, {
       method:  'DELETE',
+      headers: authHeaders(),
     })
     if (!res.ok) {
       const body = await res.json().catch(() => ({})) as { message?: string }

@@ -688,7 +688,7 @@ interface SolicitudModalProps {
 }
 
 const API_BASE = import.meta.env.VITE_API_URL?.trim() ?? ''
-const DEFAULT_APPROVAL_ASSIGNEE_EMAIL = 'alvaro.arambulo@itti.digital'
+const DEFAULT_APPROVAL_ASSIGNEE_EMAIL = 'admin@portfolio.local'
 
 function getSessionJwt(): string | null {
   if (typeof window === 'undefined') return null
@@ -1131,6 +1131,17 @@ export function AllyDetailPage({
     approverLabel?: string
   }
   const [modalConfig, setModalConfig] = useState<ModalConfig | null>(null)
+  const [borrarDeudaConfirm, setBorrarDeudaConfirm] = useState<{
+    deudaId: string
+    factura: FacturaRecord
+  } | null>(null)
+  const [borrarDeudaLoading, setBorrarDeudaLoading] = useState(false)
+  const [modificarMonto, setModificarMonto] = useState<{ factura: FacturaRecord; deudaId: string } | null>(null)
+  const [montoNuevo, setMontoNuevo] = useState('')
+  const [motivoMonto, setMotivoMonto] = useState('')
+  const [modificarMontoError, setModificarMontoError] = useState<string | null>(null)
+  const [modificarMontoLoading, setModificarMontoLoading] = useState(false)
+
   const [anularPagoConfirm, setAnularPagoConfirm] = useState<{
     cuotaId: string
     cuotaNumero: number
@@ -1140,6 +1151,23 @@ export function AllyDetailPage({
   const { aliado, compromisos, resumen } = allyDetail
   const approverLabel = getApproverLabel(userRole)
   const needsApproval = requiresApproval(userRole)
+  const isAdmin = userRole === 'admin'
+
+  const buildAnularDeudaDatos = useCallback(
+    (factura: FacturaRecord, deudaId: string) => ({
+      aliado_id: String(aliado.aliado_id),
+      aliado_nombre: aliado.aliado_nombre,
+      factura_id: factura.factura_id,
+      deuda_id: deudaId,
+      monto_neto: Number(factura.monto_neto),
+      saldo_factura: Number(factura.saldo_factura),
+      periodo: factura.periodo ?? null,
+      tipo_factura: factura.tipo_factura ?? null,
+      estado_actual: factura.estado_factura,
+    }),
+    [aliado.aliado_id, aliado.aliado_nombre],
+  )
+
   const prevDetailLoading = useRef(isLoading)
 
   const loadFacturas = useCallback(async () => {
@@ -1164,6 +1192,70 @@ export function AllyDetailPage({
       setFacturasLoading(false)
     }
   }, [aliado.aliado_id, debouncedSearch, facturaFilter, facturaPage])
+
+  const handleConfirmModificarMonto = useCallback(async () => {
+    if (!modificarMonto) return
+    const actual = Number(modificarMonto.factura.monto_neto)
+    const nuevo = Math.round(Number(montoNuevo))
+    if (!Number.isFinite(nuevo) || nuevo <= 0) {
+      setModificarMontoError('El monto nuevo tiene que ser mayor a cero.')
+      return
+    }
+    if (nuevo === actual) {
+      setModificarMontoError('El monto nuevo es igual al actual.')
+      return
+    }
+    if (!motivoMonto.trim()) {
+      setModificarMontoError('Indicá el motivo del cambio.')
+      return
+    }
+    setModificarMontoLoading(true)
+    setModificarMontoError(null)
+    try {
+      await onSolicitarAprobacion({
+        accion: 'MODIFICAR_MONTO_DEUDA',
+        tabla: 'facturacion',
+        registro_id: modificarMonto.deudaId,
+        observacion: motivoMonto.trim(),
+        datos_solicitud: {
+          ...buildAnularDeudaDatos(modificarMonto.factura, modificarMonto.deudaId),
+          monto_actual: actual,
+          monto_nuevo: nuevo,
+          motivo: motivoMonto.trim(),
+        },
+      })
+      setModificarMonto(null)
+      setMontoNuevo('')
+      setMotivoMonto('')
+      await loadFacturas()
+    } catch (e) {
+      setModificarMontoError(e instanceof Error ? e.message : 'No se pudo solicitar el cambio.')
+    } finally {
+      setModificarMontoLoading(false)
+    }
+  }, [buildAnularDeudaDatos, loadFacturas, modificarMonto, montoNuevo, motivoMonto, onSolicitarAprobacion])
+
+  const handleConfirmBorrarDeuda = useCallback(async () => {
+    if (!borrarDeudaConfirm) return
+    const { factura, deudaId } = borrarDeudaConfirm
+    setBorrarDeudaLoading(true)
+    setFacturasError(null)
+    try {
+      await onSolicitarAprobacion({
+        accion: 'ANULAR_DEUDA',
+        tabla: 'facturacion',
+        registro_id: deudaId,
+        datos_solicitud: buildAnularDeudaDatos(factura, deudaId),
+        observacion: 'Anulación directa por administrador.',
+      })
+      setBorrarDeudaConfirm(null)
+      await loadFacturas()
+    } catch (e) {
+      setFacturasError(e instanceof Error ? e.message : 'No se pudo borrar la deuda.')
+    } finally {
+      setBorrarDeudaLoading(false)
+    }
+  }, [borrarDeudaConfirm, buildAnularDeudaDatos, loadFacturas, onSolicitarAprobacion])
 
   const loadCuotas = useCallback(async (facturaId: string) => {
     setCuotasLoading((prev) => ({ ...prev, [facturaId]: true }))
@@ -1611,7 +1703,10 @@ export function AllyDetailPage({
                 const deudaId = String(factura.deuda_id || factura.factura_id)
                 const refinanciacionesPrevias = refinanciacionesByFactura[factura.factura_id] ?? 0
                 const montoNeto = Number(factura.monto_neto || 0)
-                const saldoPendiente = Number(factura.saldo_factura || 0)
+                const estadoKey = String(factura.estado_factura || '').toLowerCase()
+                const saldoPendiente = estadoKey.includes('anulad')
+                  ? 0
+                  : Number(factura.saldo_factura || 0)
                 const hasActiveCuotas = hasCuotasRealesActivas(cuotasFactura)
                 const canCreatePlan = Boolean(String(deudaId || '').trim())
                   && saldoPendiente > 0
@@ -1621,8 +1716,9 @@ export function AllyDetailPage({
                   && hasActiveCuotas
                   && refinanciacionesPrevias < 2
                 const cuotasExpanded = Boolean(expandedCuotasIds[factura.factura_id])
-                const montoPagado = Math.max(0, montoNeto - saldoPendiente)
-                const estadoKey = String(factura.estado_factura || '').toLowerCase()
+                const montoPagado = estadoKey.includes('anulad')
+                  ? 0
+                  : Math.max(0, montoNeto - saldoPendiente)
                 const fechaVencimiento = resolveFechaVencimientoFactura(factura, cuotasFactura)
                 const puedeRegistrarPago = tieneNumFacturaAsignada(factura.num_factura) && saldoPendiente > 0
 
@@ -1756,7 +1852,41 @@ export function AllyDetailPage({
                                 <span className="text-slate-400">↻</span>
                                 {isRefinanciarHere ? 'Cerrar refinanciación' : 'Refinanciar'}
                               </button>
-                              {needsApproval && (
+                              {!estadoKey.includes('anulad') && (
+                                <button
+                                  className="flex w-full items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700"
+                                  onClick={() => {
+                                    setOpenActionsId(null)
+                                    setActionsMenuPos(null)
+                                    setModificarMontoError(null)
+                                    setMontoNuevo('')
+                                    setMotivoMonto('')
+                                    setModificarMonto({ deudaId, factura })
+                                  }}
+                                  type="button"
+                                >
+                                  <span className="text-slate-400">Gs.</span>
+                                  {needsApproval ? 'Solicitar cambio de monto' : 'Cambiar monto'}
+                                </button>
+                              )}
+                              {isAdmin && !estadoKey.includes('anulad') && (
+                                <>
+                                  <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
+                                  <button
+                                    className="flex w-full items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-900/20"
+                                    onClick={() => {
+                                      setOpenActionsId(null)
+                                      setActionsMenuPos(null)
+                                      setBorrarDeudaConfirm({ deudaId, factura })
+                                    }}
+                                    type="button"
+                                  >
+                                    <span>🗑</span>
+                                    Borrar deuda
+                                  </button>
+                                </>
+                              )}
+                              {needsApproval && !estadoKey.includes('anulad') && (
                                 <>
                                   <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
                                   <button
@@ -1768,17 +1898,7 @@ export function AllyDetailPage({
                                         accion: 'ANULAR_DEUDA', tabla: 'facturacion', registro_id: deudaId,
                                         titulo: 'Solicitar anulación de deuda',
                                         descripcion: `Solicitás anular la deuda ${factura.factura_id} (${formatCurrency(Number(factura.monto_neto))}). Indicá el motivo.`,
-                                        datos: {
-                                          aliado_id:     String(aliado.aliado_id),
-                                          aliado_nombre: aliado.aliado_nombre,
-                                          factura_id:    factura.factura_id,
-                                          deuda_id:      deudaId,
-                                          monto_neto:    Number(factura.monto_neto),
-                                          saldo_factura: Number(factura.saldo_factura),
-                                          periodo:       factura.periodo ?? null,
-                                          tipo_factura:  factura.tipo_factura ?? null,
-                                          estado_actual: factura.estado_factura,
-                                        },
+                                        datos: buildAnularDeudaDatos(factura, deudaId),
                                       })
                                     }}
                                     type="button"
@@ -2061,6 +2181,72 @@ export function AllyDetailPage({
       variant="danger"
       onCancel={() => setAnularPagoConfirm(null)}
       onConfirm={handleConfirmAnularPago}
+    />
+
+    {modificarMonto && (
+      <div className="fixed inset-0 z-[220] grid place-items-center bg-slate-950/40 p-4">
+        <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl dark:bg-slate-900">
+          <h2 className="text-lg font-black text-slate-900 dark:text-white">
+            {needsApproval ? 'Solicitar cambio de monto' : 'Cambiar monto'}
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            {modificarMonto.factura.factura_id} · actual {formatCurrency(Number(modificarMonto.factura.monto_neto))}
+          </p>
+          <p className="mt-2 text-xs text-slate-500">
+            Solo deudas sin cobros y con una cuota o ninguna. Si ya hay pagos, usá refinanciación.
+          </p>
+          <div className="mt-4">
+            <Input
+              id="monto-nuevo-deuda"
+              inputMode="numeric"
+              label="Monto nuevo (Gs.)"
+              value={montoNuevo}
+              onChange={(event) => setMontoNuevo(event.target.value)}
+            />
+          </div>
+          <label className="mt-3 block text-xs font-semibold text-slate-600 dark:text-slate-300" htmlFor="motivo-monto-deuda">
+            Motivo
+          </label>
+          <textarea
+            id="motivo-monto-deuda"
+            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+            rows={3}
+            value={motivoMonto}
+            onChange={(event) => setMotivoMonto(event.target.value)}
+          />
+          {modificarMontoError && (
+            <p role="alert" className="mt-2 text-sm text-rose-600">{modificarMontoError}</p>
+          )}
+          <div className="mt-4 flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={modificarMontoLoading}
+              onClick={() => setModificarMonto(null)}
+            >
+              Cancelar
+            </Button>
+            <Button type="button" disabled={modificarMontoLoading} onClick={() => void handleConfirmModificarMonto()}>
+              {modificarMontoLoading ? 'Enviando…' : needsApproval ? 'Solicitar' : 'Guardar'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    <ConfirmDialog
+      cancelLabel="Cancelar"
+      confirmLabel={borrarDeudaLoading ? 'Procesando…' : 'Borrar deuda'}
+      message={
+        borrarDeudaConfirm
+          ? `La deuda ${borrarDeudaConfirm.deudaId} (${formatCurrency(Number(borrarDeudaConfirm.factura.monto_neto))}) quedará marcada como Anulada. El registro se conserva en el historial.`
+          : ''
+      }
+      open={borrarDeudaConfirm !== null}
+      title="¿Borrar esta deuda?"
+      variant="danger"
+      onCancel={() => !borrarDeudaLoading && setBorrarDeudaConfirm(null)}
+      onConfirm={handleConfirmBorrarDeuda}
     />
   </>
   )

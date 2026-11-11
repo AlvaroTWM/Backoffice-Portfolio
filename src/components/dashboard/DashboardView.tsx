@@ -7,17 +7,145 @@ import {
   LineElement,
   LineController,
   PointElement,
+  ArcElement,
   Tooltip,
   Legend,
   Filler,
 } from 'chart.js'
-import type { ChartOptions } from 'chart.js'
-import { Bar, Chart } from 'react-chartjs-2'
+import type { ChartOptions, Plugin } from 'chart.js'
+import { Bar, Chart, Doughnut } from 'react-chartjs-2'
 import { useEffect, useMemo, useState } from 'react'
 
 import type { DashboardStats } from '../../services/loyaltyBackend'
 import { fetchDashboardStats } from '../../services/loyaltyBackend'
-import { getChartPalette } from '../../constants/chartPalette'
+import { chartColorsForCount, getChartPalette } from '../../constants/chartPalette'
+
+// ─── Valores dentro de las barras ─────────────────────────────────────────────
+
+/** 11.350.000 → "11.35M" · 850.000 → "850K" · 42 → "42" */
+function compactNumber(n: number): string {
+  const abs = Math.abs(n)
+  const trim = (v: number, d: number) => String(Number(v.toFixed(d)))
+  if (abs >= 1e9) return `${trim(n / 1e9, 1)} mil M`
+  if (abs >= 1e6) return `${trim(n / 1e6, 2)}M`
+  if (abs >= 1e3) return `${trim(n / 1e3, 1)}K`
+  return String(Math.round(n))
+}
+
+/** Texto legible sobre el color de la barra (claro u oscuro según luminosidad). */
+function readableOn(bg: unknown): string {
+  if (typeof bg !== 'string' || !/^#[0-9a-f]{6}$/i.test(bg)) return '#FFFFFF'
+  const r = parseInt(bg.slice(1, 3), 16)
+  const g = parseInt(bg.slice(3, 5), 16)
+  const b = parseInt(bg.slice(5, 7), 16)
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.6 ? '#0A1614' : '#FFFFFF'
+}
+
+interface BarValueLabelsOptions {
+  enabled?: boolean
+  /** Color del texto cuando la barra es muy baja y el valor va encima. */
+  outsideColor?: string
+}
+
+/**
+ * Dibuja el valor de cada barra vertical: dentro si entra, encima si no (solo barras sin apilar).
+ * Opt-in por gráfico con `plugins.barValueLabels.enabled`.
+ */
+const barValueLabels: Plugin = {
+  id: 'barValueLabels',
+  afterDatasetsDraw(chart) {
+    const cfg = (chart.options.plugins as Record<string, unknown> | undefined)?.barValueLabels as
+      | BarValueLabelsOptions
+      | undefined
+    if (!cfg?.enabled || chart.options.indexAxis === 'y') return
+
+    const { ctx } = chart
+    ctx.save()
+    ctx.font = '600 11px Inter, system-ui, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+
+    chart.data.datasets.forEach((dataset, datasetIndex) => {
+      const meta = chart.getDatasetMeta(datasetIndex)
+      if (meta.type !== 'bar' || !chart.isDatasetVisible(datasetIndex)) return
+      const stacked = Boolean((dataset as { stack?: string }).stack)
+
+      meta.data.forEach((element, index) => {
+        const value = Number(dataset.data[index])
+        if (!Number.isFinite(value) || value <= 0) return
+
+        const { x, y, base, width } = (element as unknown as BarElement).getProps(
+          ['x', 'y', 'base', 'width'],
+          true,
+        )
+        if (x === null || y === null) return
+        const height = Math.abs(base - y)
+        const text = compactNumber(value)
+        const fits = height >= 18 && ctx.measureText(text).width <= width - 4
+        const bg = Array.isArray(dataset.backgroundColor) ? dataset.backgroundColor[index] : dataset.backgroundColor
+
+        if (fits) {
+          ctx.fillStyle = readableOn(bg)
+          ctx.fillText(text, x, (y + base) / 2)
+        } else if (!stacked) {
+          ctx.fillStyle = cfg.outsideColor ?? '#94a3b8'
+          ctx.fillText(text, x, Math.min(y, base) - 8)
+        }
+      })
+    })
+    ctx.restore()
+  },
+}
+
+/** Porcentaje de cada porción de dona: dentro si entra, afuera del anillo si la porción es chica. */
+const doughnutPercentLabels: Plugin = {
+  id: 'doughnutPercentLabels',
+  afterDatasetsDraw(chart) {
+    const cfg = (chart.options.plugins as Record<string, unknown> | undefined)?.doughnutPercentLabels as
+      | BarValueLabelsOptions
+      | undefined
+    if (!cfg?.enabled) return
+
+    const dataset = chart.data.datasets[0]
+    const meta = chart.getDatasetMeta(0)
+    if (!dataset || meta.type !== 'doughnut') return
+
+    const values = (dataset.data as unknown[]).map((v) => Math.max(0, Number(v) || 0))
+    const total = values.reduce((a, b) => a + b, 0)
+    if (total <= 0) return
+
+    const { ctx } = chart
+    ctx.save()
+    ctx.font = '700 11px Inter, system-ui, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+
+    meta.data.forEach((element, index) => {
+      const share = (values[index] / total) * 100
+      if (share <= 0 || !chart.getDataVisibility(index)) return
+
+      const { x, y, startAngle, endAngle, innerRadius, outerRadius } = (element as unknown as ArcElement).getProps(
+        ['x', 'y', 'startAngle', 'endAngle', 'innerRadius', 'outerRadius'],
+        true,
+      )
+      if (x === null || y === null) return
+      const mid = (startAngle + endAngle) / 2
+      const text = `${share >= 10 ? Math.round(share) : Number(share.toFixed(1))}%`
+      const bg = Array.isArray(dataset.backgroundColor) ? dataset.backgroundColor[index] : dataset.backgroundColor
+
+      if (share >= 6) {
+        const r = (innerRadius + outerRadius) / 2
+        ctx.fillStyle = readableOn(bg)
+        ctx.fillText(text, x + Math.cos(mid) * r, y + Math.sin(mid) * r)
+      } else {
+        const r = outerRadius + 14
+        ctx.fillStyle = cfg.outsideColor ?? '#94a3b8'
+        ctx.fillText(text, x + Math.cos(mid) * r, y + Math.sin(mid) * r)
+      }
+    })
+    ctx.restore()
+  },
+}
 
 ChartJS.register(
   CategoryScale,
@@ -27,9 +155,12 @@ ChartJS.register(
   LineElement,
   LineController,
   PointElement,
+  ArcElement,
   Tooltip,
   Legend,
   Filler,
+  barValueLabels,
+  doughnutPercentLabels,
 )
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -55,6 +186,8 @@ function mesLabel(iso: string): string {
 
 interface ChartTheme {
   gridColor: string
+  /** Línea base del eje X y sus marcas (los charts no deben "flotar"). */
+  axisColor: string
   tickColor: string
   tooltipBg: string
   tooltipTitle: string
@@ -66,6 +199,7 @@ function getChartTheme(isDark: boolean): ChartTheme {
   return isDark
     ? {
         gridColor: 'rgba(203, 213, 225, 0.2)',
+        axisColor: 'rgba(203, 213, 225, 0.45)',
         tickColor: '#e2e8f0',
         tooltipBg: '#334155',
         tooltipTitle: '#f8fafc',
@@ -74,6 +208,7 @@ function getChartTheme(isDark: boolean): ChartTheme {
       }
     : {
         gridColor: 'rgba(148, 163, 184, 0.35)',
+        axisColor: 'rgba(100, 116, 139, 0.55)',
         tickColor: '#64748b',
         tooltipBg: '#ffffff',
         tooltipTitle: '#334155',
@@ -82,38 +217,79 @@ function getChartTheme(isDark: boolean): ChartTheme {
       }
 }
 
-function baseChartOptions(theme: ChartTheme, extra?: object): ChartOptions<'bar'> {
+/** Eje X: línea base + marcas cortas; sin líneas verticales que crucen el gráfico. */
+function xAxisLine(theme: ChartTheme) {
   return {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        labels: { color: theme.tickColor, boxWidth: 10, boxHeight: 10, font: { size: 11 } },
-      },
-      tooltip: {
-        backgroundColor: theme.tooltipBg,
-        titleColor: theme.tooltipTitle,
-        bodyColor: theme.tooltipBody,
-        borderColor: theme.tooltipBorder,
-        borderWidth: 1,
-        padding: 10,
-      },
+    border: { display: true, color: theme.axisColor, width: 1 },
+    grid: {
+      display: true,
+      drawOnChartArea: false,
+      drawTicks: true,
+      tickLength: 6,
+      color: theme.axisColor,
+      tickColor: theme.axisColor,
     },
-    scales: {
-      x: {
-        grid: { color: theme.gridColor },
-        ticks: { color: theme.tickColor, font: { size: 10 } },
-      },
-      y: {
-        grid: { color: theme.gridColor },
-        ticks: {
-          color: theme.tickColor,
-          font: { size: 10 },
-          callback: (v: string | number) => fmt(Number(v)),
+  }
+}
+
+/** Sin grillas ni ticks numéricos en Y; valores dentro de las barras; leyenda solo de categorías/colores. */
+function baseChartOptions(theme: ChartTheme, extra?: object): ChartOptions<'bar'> {
+  const { plugins: extraPlugins, ...restExtra } = (extra ?? {}) as { plugins?: object }
+  const plugins = {
+    barValueLabels: { enabled: true, outsideColor: theme.tickColor },
+    legend: {
+      display: true,
+      position: 'bottom',
+      labels: {
+        color: theme.tickColor,
+        boxWidth: 10,
+        boxHeight: 10,
+        font: { size: 11 },
+        generateLabels: (chart: ChartJS) => {
+          const datasets = chart.data.datasets ?? []
+          return datasets.map((ds, i) => ({
+            text: String(ds.label ?? ''),
+            fillStyle: String(
+              Array.isArray(ds.backgroundColor)
+                ? ds.backgroundColor[0]
+                : ds.backgroundColor ?? theme.tickColor,
+            ),
+            strokeStyle: 'transparent',
+            fontColor: theme.tickColor,
+            hidden: !chart.isDatasetVisible(i),
+            datasetIndex: i,
+          }))
         },
       },
     },
-    ...extra,
+    tooltip: {
+      backgroundColor: theme.tooltipBg,
+      titleColor: theme.tooltipTitle,
+      bodyColor: theme.tooltipBody,
+      borderColor: theme.tooltipBorder,
+      borderWidth: 1,
+      padding: 10,
+    },
+  }
+
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    layout: { padding: { top: 16 } },
+    scales: {
+      x: {
+        ...xAxisLine(theme),
+        ticks: { color: theme.tickColor, font: { size: 10 } },
+      },
+      y: {
+        border: { display: false },
+        grid: { display: false, drawOnChartArea: false },
+        ticks: { display: false },
+      },
+    },
+    ...restExtra,
+    // Se mezcla por clave: un gráfico puede ocultar la leyenda sin perder tooltip ni valores
+    plugins: { ...plugins, ...extraPlugins },
   } as ChartOptions<'bar'>
 }
 
@@ -252,28 +428,51 @@ export function DashboardView({ isDark }: DashboardViewProps) {
 
   const historicoOptions = useMemo(() => baseChartOptions(theme, {
     scales: {
-      x: { stacked: true, grid: { color: theme.gridColor }, ticks: { color: theme.tickColor, font: { size: 10 } } },
+      x: {
+        stacked: true,
+        ...xAxisLine(theme),
+        ticks: { color: theme.tickColor, font: { size: 10 } },
+      },
       y: {
         stacked: true,
-        grid: { color: theme.gridColor },
-        ticks: { color: theme.tickColor, font: { size: 10 }, callback: (v: string | number) => fmt(Number(v)) },
+        border: { display: false },
+        grid: { display: false },
+        ticks: { display: false },
       },
     },
   }), [theme])
 
   const facturasOptions = useMemo(() => baseChartOptions(theme, {
     plugins: { legend: { display: false } },
-    scales: {
-      x: { grid: { display: false }, ticks: { color: theme.tickColor } },
-      y: { grid: { color: theme.gridColor }, ticks: { color: theme.tickColor, stepSize: 10 } },
-    },
   }), [theme])
 
   const paretoOptions = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
+    layout: { padding: { top: 16 } },
     plugins: {
-      legend: { labels: { color: theme.tickColor, boxWidth: 10, font: { size: 10 } } },
+      barValueLabels: { enabled: true, outsideColor: theme.tickColor },
+      legend: {
+        position: 'bottom' as const,
+        labels: {
+          color: theme.tickColor,
+          boxWidth: 10,
+          font: { size: 10 },
+          generateLabels: (chart: ChartJS) =>
+            (chart.data.datasets ?? []).map((ds, i) => ({
+              text: String(ds.label ?? ''),
+              fillStyle: String(
+                Array.isArray(ds.backgroundColor)
+                  ? ds.backgroundColor[0]
+                  : (ds as { borderColor?: string }).borderColor ?? ds.backgroundColor ?? theme.tickColor,
+              ),
+              strokeStyle: 'transparent',
+              fontColor: theme.tickColor,
+              hidden: !chart.isDatasetVisible(i),
+              datasetIndex: i,
+            })),
+        },
+      },
       tooltip: {
         backgroundColor: theme.tooltipBg,
         titleColor: theme.tooltipTitle,
@@ -289,50 +488,91 @@ export function DashboardView({ isDark }: DashboardViewProps) {
       },
     },
     scales: {
-      x: { grid: { display: false }, ticks: { color: theme.tickColor, font: { size: 9 }, maxRotation: 45 } },
+      x: {
+        ...xAxisLine(theme),
+        ticks: { color: theme.tickColor, font: { size: 9 }, maxRotation: 45 },
+      },
       y: {
         position: 'left' as const,
-        grid: { color: theme.gridColor },
-        ticks: { color: theme.tickColor, font: { size: 9 }, callback: (v: string | number) => fmt(Number(v)) },
+        border: { display: false },
+        grid: { display: false },
+        ticks: { display: false },
       },
       y1: {
         position: 'right' as const,
         min: 0,
         max: 100,
-        grid: { drawOnChartArea: false },
-        ticks: { color: palette.accentLine, font: { size: 9 }, callback: (v: string | number) => `${v}%` },
-      },
-    },
-  }), [theme, palette.accentLine])
-
-  const compromisosOptions = useMemo(() => baseChartOptions(theme, {
-    scales: {
-      x: { stacked: true, grid: { color: theme.gridColor }, ticks: { color: theme.tickColor, font: { size: 10 } } },
-      y: {
-        stacked: true,
-        grid: { color: theme.gridColor },
-        ticks: { color: theme.tickColor, font: { size: 10 }, callback: (v: string | number) => fmt(Number(v)) },
+        border: { display: false },
+        grid: { display: false, drawOnChartArea: false },
+        ticks: { display: false },
       },
     },
   }), [theme])
 
-  const horizontalBarOptions = useMemo(() => baseChartOptions(theme, {
-    indexAxis: 'y' as const,
-    plugins: { legend: { display: false } },
+  const compromisosOptions = useMemo(() => baseChartOptions(theme, {
     scales: {
       x: {
-        grid: { color: theme.gridColor },
-        ticks: { color: theme.tickColor, font: { size: 10 }, callback: (v: string | number) => fmt(Number(v)) },
+        stacked: true,
+        ...xAxisLine(theme),
+        ticks: { color: theme.tickColor, font: { size: 10 } },
       },
-      y: { grid: { display: false }, ticks: { color: theme.tickColor, font: { size: 11 } } },
+      y: {
+        stacked: true,
+        border: { display: false },
+        grid: { display: false },
+        ticks: { display: false },
+      },
     },
   }), [theme])
 
   const verticalBarOptions = useMemo(() => baseChartOptions(theme, {
     plugins: { legend: { display: false } },
-    scales: {
-      x: { grid: { display: false }, ticks: { color: theme.tickColor } },
-      y: { grid: { color: theme.gridColor }, ticks: { color: theme.tickColor, callback: (v: string | number) => fmt(Number(v)) } },
+  }), [theme])
+
+  const doughnutOptions = useMemo(() => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    cutout: '58%',
+    layout: { padding: 20 },
+    plugins: {
+      doughnutPercentLabels: { enabled: true, outsideColor: theme.tickColor },
+      legend: {
+        position: 'bottom' as const,
+        labels: {
+          color: theme.tickColor,
+          boxWidth: 10,
+          boxHeight: 10,
+          font: { size: 11 },
+          generateLabels: (chart: ChartJS) => {
+            const labels = chart.data.labels ?? []
+            const ds = chart.data.datasets[0]
+            const colors = Array.isArray(ds?.backgroundColor) ? ds.backgroundColor : []
+            return labels.map((label, i) => ({
+              text: String(label),
+              fillStyle: String(colors[i] ?? theme.tickColor),
+              strokeStyle: 'transparent',
+              fontColor: theme.tickColor,
+              hidden: false,
+              index: i,
+            }))
+          },
+        },
+      },
+      tooltip: {
+        backgroundColor: theme.tooltipBg,
+        titleColor: theme.tooltipTitle,
+        bodyColor: theme.tooltipBody,
+        borderColor: theme.tooltipBorder,
+        borderWidth: 1,
+        callbacks: {
+          label: (ctx: { label?: string; raw: unknown; parsed: number; dataset: { data: unknown[] } }) => {
+            const value = Number(ctx.raw ?? ctx.parsed)
+            const total = ctx.dataset.data.reduce<number>((a, b) => a + (Number(b) || 0), 0)
+            const share = total > 0 ? ` (${((value / total) * 100).toFixed(1)}%)` : ''
+            return `${ctx.label ?? ''}: ${fmt(value)}${share}`
+          },
+        },
+      },
     },
   }), [theme])
 
@@ -485,6 +725,49 @@ export function DashboardView({ isDark }: DashboardViewProps) {
         </ChartPanel>
       </div>
 
+      {/* ── Antigüedad de la cartera (ancho completo) ── */}
+      <ChartPanel className="flex min-h-[10rem] flex-col">
+        <PanelTitle subtitle="Saldo pendiente según días de atraso de la cuota">
+          Antigüedad de la cartera
+        </PanelTitle>
+        {loading || !stats ? (
+          <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-5">
+            {Array.from({ length: 5 }, (_, i) => <Skeleton key={i} className="h-20 w-full" />)}
+          </div>
+        ) : (() => {
+          const a = stats.aging
+          const total = a.alDia + a.d1_30 + a.d31_60 + a.d61_90 + a.mas90
+          const tramos = [
+            { label: 'Al día',       v: a.alDia,  dot: 'bg-emerald-500' },
+            { label: '1–30 días',    v: a.d1_30,  dot: 'bg-amber-400' },
+            { label: '31–60 días',   v: a.d31_60, dot: 'bg-orange-500' },
+            { label: '61–90 días',   v: a.d61_90, dot: 'bg-rose-500' },
+            { label: 'Más de 90',    v: a.mas90,  dot: 'bg-red-700' },
+          ]
+          return total === 0 ? (
+            <div className="flex flex-1 items-center justify-center text-sm text-slate-500 dark:text-slate-300">
+              Sin saldo pendiente.
+            </div>
+          ) : (
+            <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-5">
+              {tramos.map(({ dot, label, v }) => (
+                <div
+                  key={label}
+                  className="flex h-full min-h-[5.5rem] flex-col justify-center rounded-lg border border-slate-100 bg-slate-50/80 px-4 py-3 dark:border-slate-600 dark:bg-slate-900/40"
+                >
+                  <div className="flex items-center gap-2">
+                    <div className={`size-2.5 shrink-0 rounded-full ${dot}`} />
+                    <span className="text-xs font-medium text-slate-500 dark:text-slate-300">{label}</span>
+                  </div>
+                  <p className="mt-2 text-sm font-black tabular-nums text-slate-900 dark:text-slate-50 sm:text-base">{fmt(v)}</p>
+                  <p className="text-xs tabular-nums text-slate-500 dark:text-slate-300">{((v / total) * 100).toFixed(1)}%</p>
+                </div>
+              ))}
+            </div>
+          )
+        })()}
+      </ChartPanel>
+
       {/* ── Proyección de cobros (ancho completo) ── */}
       <ChartPanel className="flex min-h-[10rem] flex-col">
         <PanelTitle subtitle="Saldo pendiente por fecha de vencimiento (acumulado)">
@@ -554,25 +837,25 @@ export function DashboardView({ isDark }: DashboardViewProps) {
         )}
       </ChartPanel>
 
-      {/* ── Fila 6: Concentración por comercio ── */}
+      {/* ── Fila 6: Concentración por comercioo ── */}
       <ChartPanel>
         <PanelTitle>Concentración de deuda (comercio)</PanelTitle>
         {loading ? <Skeleton className="h-56 w-full" /> : mixLabels.length === 0 ? (
           <div className="flex h-56 items-center justify-center text-sm text-slate-500 dark:text-slate-300">Sin datos por servicio.</div>
         ) : (
           <div className="h-56">
-            <Bar
+            <Doughnut
               key={`comercio-${chartKey}`}
               data={{
                 labels: mixLabels,
                 datasets: [{
                   label: 'Deuda pendiente',
                   data: mixMontos,
-                  backgroundColor: palette.series.slice(0, mixLabels.length),
-                  borderRadius: 4,
+                  backgroundColor: chartColorsForCount(mixLabels.length),
+                  borderWidth: 0,
                 }],
               }}
-              options={horizontalBarOptions}
+              options={doughnutOptions}
             />
           </div>
         )}

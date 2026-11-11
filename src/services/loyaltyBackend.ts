@@ -50,6 +50,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
       detail?: string
       code?: string
       destinos?: unknown
+      errors?: Record<string, string>
     }
     console.error('[apiFetch] Server error:', JSON.stringify(body))
     const detail = body.detail ? ` | ${body.detail}` : ''
@@ -57,7 +58,9 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
       status?: number
       code?: string
       destinos?: unknown
+      fieldErrors?: Record<string, string>
     }
+    err.fieldErrors = body.errors
     err.status = response.status
     err.code = body.code
     err.destinos = body.destinos
@@ -65,6 +68,43 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>
+}
+
+// ─── Reports ──────────────────────────────────────────────────────────────────
+
+export interface ReportEntry {
+  category: string
+  slug: string
+  title: string
+}
+
+export interface ReportCategory {
+  name: string
+  reports: ReportEntry[]
+}
+
+export async function fetchReports(): Promise<ReportCategory[]> {
+  const { categories } = await apiFetch<{ categories: ReportCategory[] }>('/api/reports')
+  return categories
+}
+
+export async function fetchReportHtml(category: string, slug: string): Promise<string> {
+  if (isPortfolioDemo) {
+    const { getPortfolioReportHtml } = await import('./portfolioDemo/reports')
+    return getPortfolioReportHtml(category, slug)
+  }
+  const jwt = getStoredJwt()
+  const response = await fetch(
+    `${API_BASE}/api/reports/${encodeURIComponent(category)}/${encodeURIComponent(slug)}`,
+    { headers: jwt ? { Authorization: `Bearer ${jwt}` } : {} },
+  )
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { message?: string }
+    const err = new Error(body.message ?? `Error ${response.status} al abrir el reporte.`) as Error & { status?: number }
+    err.status = response.status
+    throw err
+  }
+  return response.text()
 }
 
 // ─── Session ──────────────────────────────────────────────────────────────────
@@ -346,6 +386,37 @@ export async function previewAplicacionPagoBackend(payload: {
     body:   JSON.stringify(payload),
     method: 'POST',
   })
+}
+
+export interface ManualDeudaFields {
+  periodo: string
+  servicio: string
+  estado_deuda: string
+  deuda_total: number
+}
+
+export interface ManualAliadoPayload extends ManualDeudaFields {
+  cod_aliado: string
+  aliado: string
+  bolsa: string
+  rubro: string
+  ejecutiva: string
+  estado_aliado: string
+  ruc: string
+}
+
+export async function crearAliadoManualBackend(payload: ManualAliadoPayload) {
+  return apiFetch<{ message: string; aliado_creado: boolean; deuda_id: string }>(
+    '/api/dev/manual-aliado',
+    { body: JSON.stringify(payload), method: 'POST' },
+  )
+}
+
+export async function crearDeudaManualBackend(payload: ManualDeudaFields & { cod_aliado: string }) {
+  return apiFetch<{ message: string; deuda_id: string; aliado_nombre: string }>(
+    '/api/dev/manual-deuda',
+    { body: JSON.stringify(payload), method: 'POST' },
+  )
 }
 
 export async function registrarPagoBackend(payload: RegistrarPagoPayload) {

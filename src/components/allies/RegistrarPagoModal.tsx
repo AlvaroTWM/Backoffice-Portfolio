@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import type {
   CuotaRecord,
@@ -189,7 +190,7 @@ export function RegistrarPagoModal({
     }
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 dark:bg-black/60">
       <div
         aria-modal="true"
@@ -344,6 +345,7 @@ export function RegistrarPagoModal({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

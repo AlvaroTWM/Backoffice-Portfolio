@@ -45,6 +45,10 @@ const TEAM_BIRTHDAYS: TeamMember[] = [
   { name: 'Constanza', birthday: '09-09' },
   { name: 'Belen',    birthday: '10-26' },
   { name: 'Facu',     birthday: '11-28' },
+  { name: 'Sergio',     birthday: '10-07' },
+  { name: 'Laura',     birthday: '07-29' },
+  { name: 'Sofia',     birthday: '03-18' },
+  { name: 'Emanuel',     birthday: '11-25' },
 ]
 
 function getUpcomingBirthdays(members: TeamMember[], days = 30) {
